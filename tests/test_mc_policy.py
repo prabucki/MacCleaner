@@ -163,6 +163,34 @@ def test_irreplaceable_data_is_hard_protected(path):
 # --------------------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        # Regression: this exact file (11.75 GB) was destroyed during development.
+        # `**/*.pvm` protected VM *bundles*, but an archive of one is a plain file
+        # whose name merely ends in `.zip`, and nothing matched it.
+        "~/Parallels/Windows 11 (copy-do not run).pvm.zip",
+        "~/Backups/win.pvm.tar.gz",
+        "~/anywhere/at/all/thing.pvm.7z",
+        "~/Documents/exported.utm.zip",
+        "~/Virtual Machines.localized/Win11.vmwarevm.zip",
+        # The VM storage directories themselves, not just the bundle extensions.
+        "~/Parallels",
+        "~/Parallels/notes.txt",
+        "~/Parallels/snapshots/whatever",
+        "~/Virtual Machines.localized/anything",
+    ],
+)
+@pytest.mark.parametrize("privileged", [False, True])
+@pytest.mark.parametrize("override", [False, True])
+def test_virtual_machines_and_their_archives_are_protected(path, privileged, override):
+    """VM bundles, VM archives, and the folders they live in are all hard-protected."""
+
+    decision = policy.check(path, privileged=privileged, override=override)
+
+    assert not decision.allowed, f"{path} was deletable (privileged={privileged}, override={override})"
+
+
 @pytest.mark.parametrize("path", ["~/Documents/report.docx", "~/Desktop/notes.txt", "~/Pictures/holiday.jpg"])
 def test_soft_protected_needs_override(path):
     assert not policy.check(path).allowed

@@ -282,10 +282,28 @@ _HARD_PROTECTED = (
     "**/*.pvm",
     "**/*.pvm/**",
     "**/*.utm",
+    "**/*.utm/**",
     "**/*.vmwarevm",
+    "**/*.vmwarevm/**",
     "**/*.sparsebundle",
     "**/*.sparseimage",
     "**/*.dmg.sparsebundle",
+    # Archives OF virtual machines. A `.pvm` bundle is protected above, but
+    # `Windows 11.pvm.zip` is a plain file whose name merely ends in `.zip`, and
+    # nothing here matched it. That gap cost a real 11.75 GB archive during
+    # development, so the suffix wildcard covers .pvm.zip / .pvm.tar.gz / .pvm.7z
+    # and anything else someone compresses a VM into.
+    "**/*.pvm.*",
+    "**/*.utm.*",
+    "**/*.vmwarevm.*",
+    # The default VM storage directories themselves. Protecting only the bundle
+    # extensions leaves everything else in these folders — snapshots, archives,
+    # exports, notes — unprotected.
+    "~/Parallels",
+    "~/Parallels/**",
+    "~/Virtual Machines.localized",
+    "~/Virtual Machines.localized/**",
+    "~/Library/Containers/com.utmapp.UTM/**",
     # Backups
     "**/Backups.backupdb",
     "**/Backups.backupdb/**",
