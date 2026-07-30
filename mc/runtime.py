@@ -229,7 +229,7 @@ class Runtime:
 
     # -- size estimation ---------------------------------------------------------------
 
-    def estimate(self, path_module, seen: Optional[set] = None) -> int:
+    def estimate(self, path_module, seen: Optional[set] = None, detail: Optional[list] = None) -> int:
         """
         Bytes this path module would account for, honouring policy.
 
@@ -242,6 +242,8 @@ class Runtime:
             rules both reach Ferdium's partitions — and without this the total is
             inflated by every overlap. Deletion itself is idempotent, so the overlap only
             matters for the estimate.
+        :param detail: Optional list to append ``(path, size)`` pairs to, so callers can
+            report what makes up the total without re-walking the filesystem.
         """
 
         pattern = path_module.get_path.as_posix()
@@ -268,6 +270,10 @@ class Runtime:
 
                 seen.add(as_text)
 
-            total += path_size(concrete)
+            size = path_size(concrete)
+            total += size
+
+            if detail is not None and size:
+                detail.append((concrete, size))
 
         return total

@@ -8,10 +8,25 @@ escalation through a verb-limited helper, timeouts on everything, and ~70 cleanu
 covering what CleanMyMac and OnyX do.
 
 ```
-mc --dry-run      # see what would be cleaned, touch nothing
+mc --breakdown    # readable summary of what would be deleted, folders rolled up
+mc --dry-run      # totals only, touch nothing
 mc                # clean at the default (aggressive) profile
 mc --restore ...  # undo a run
 ```
+
+`--breakdown` is the one to run before a first real cleanup. It groups by module, rolls
+near-identical paths up to their common directory, and shows an item count instead of
+sixty lines of per-service cache UUIDs:
+
+```
+electron_apps  10.93 GB
+       9.56 GB    58x  ~/Library/Application Support/Ferdium/
+     653.99 MB    18x  ~/Library/Application Support/Code/
+     524.48 MB    13x  ~/Library/Application Support/Notion/
+      19.82 MB    50x  + 13 more locations
+```
+
+Add `--breakdown-all` to list every path instead.
 
 ---
 

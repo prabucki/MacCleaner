@@ -130,6 +130,16 @@ def build_parser(defaults=None) -> argparse.ArgumentParser:
 
     out = parser.add_argument_group("output")
     out.add_argument("-v", "--verbose", action="store_true", help="list every path as it is processed")
+    out.add_argument(
+        "--breakdown",
+        action="store_true",
+        help="grouped view of what would be deleted, folders rolled up (implies --dry-run)",
+    )
+    out.add_argument(
+        "--breakdown-all",
+        action="store_true",
+        help="like --breakdown but lists every path instead of collapsing",
+    )
     out.add_argument("--json", dest="json_path", default="", help="write the run report to this path as well")
     out.add_argument("--no-notify", action="store_true", help="suppress the macOS notification")
 
@@ -290,6 +300,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser(config)
     args = parser.parse_args(argv)
 
+    if args.breakdown or args.breakdown_all:
+        args.dry_run = True
+
     if not config.notify:
         os.environ["MACCLEANER_NO_NOTIFY"] = "1"
     if not config.quarantine:
@@ -419,8 +432,16 @@ def _run(args, privileged: Privileged) -> int:
     )
 
     # -- 5. accounting -----------------------------------------------------------------
-    estimated = _estimate(collector, runtime, verbose=args.verbose)
+    want_detail = args.breakdown or args.breakdown_all
+    details: dict = {} if want_detail else None
+
+    estimated = _estimate(collector, runtime, verbose=args.verbose, details=details)
     report.estimated_bytes = estimated
+
+    if want_detail:
+        from mc.breakdown import render_breakdown
+
+        render_breakdown(console, details, total=estimated, show_all=args.breakdown_all)
 
     if args.dry_run:
         print_panel(
@@ -448,7 +469,7 @@ def _run(args, privileged: Privileged) -> int:
     return 0
 
 
-def _estimate(collector: _Collector, runtime: Runtime, *, verbose: bool) -> int:
+def _estimate(collector: _Collector, runtime: Runtime, *, verbose: bool, details=None) -> int:
     """
     Measure everything the collector holds, honouring policy.
 
@@ -463,8 +484,15 @@ def _estimate(collector: _Collector, runtime: Runtime, *, verbose: bool) -> int:
     seen: set = set()  # shared across modules so overlapping rules are counted once
 
     for module in ProgressBar.wrap_iter(path_modules, description="Measuring", total=len(path_modules)):
-        size = runtime.estimate(module, seen)
+        owner = getattr(module, "owner", "unknown")
+        rule = module.get_path.as_posix()
+        collected: list = [] if details is not None else None
+
+        size = runtime.estimate(module, seen, collected)
         total += size
+
+        if details is not None and collected:
+            details.setdefault((owner, rule), []).extend(collected)
 
         # Attribute to the owning module so the dry-run table is per-module rather than
         # one aggregate number.
