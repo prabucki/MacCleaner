@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from mc.breakdown import _elide, _group_by_ancestor, _leaf_summary
-from mc.util import human
+from mc.util import human, restore_terminal
 
 __all__ = ["Selection", "review_selection", "is_interactive"]
 
@@ -57,6 +57,24 @@ def is_interactive() -> bool:
         return sys.stdin.isatty() and sys.stdout.isatty()
     except (AttributeError, ValueError):  # pragma: no cover - closed streams
         return False
+
+
+def _ask(console, prompt: str) -> str:
+    """
+    Read a line, bypassing rich's console input.
+
+    ``Console.input`` renders the prompt through the console, which is exactly what a
+    stray Live display repaints over. Writing the prompt and reading with the builtin
+    keeps the two concerns apart.
+    """
+
+    console.print(prompt, end="")
+
+    try:
+        return input().strip().lower()
+    finally:
+        # An interrupt here leaves the terminal however the tty driver left it.
+        restore_terminal()
 
 
 def _module_rows(details: Dict[Tuple[str, str], List[Tuple[Path, int]]]):
@@ -130,7 +148,7 @@ def _drill(console, module: str, entries, selection: Selection) -> None:
             )
 
         console.print("\n[dim]numbers to toggle · [/dim]back[dim] to return[/dim]")
-        raw = console.input("locations> ").strip().lower()
+        raw = _ask(console, "locations> ")
 
         if raw in ("back", "b", "", "ok"):
             return
@@ -161,6 +179,21 @@ def review_selection(console, details, *, total: int) -> Selection:
     if not rows:
         return selection
 
+    # Anything that ran before this may have left the terminal in raw mode — a killed
+    # child that was reading single keypresses is enough. In that state the prompt below
+    # accepts no input and Ctrl-C echoes as text instead of interrupting, which strands
+    # the user with no way out. Repair it before asking a question.
+    restore_terminal()
+
+    # A progress bar's Live display repaints over the prompt and swallows the echo. It
+    # should already be stopped, but stopping it again is free and a stuck prompt is not.
+    try:
+        from mac_cleanup.progress import ProgressBar
+
+        ProgressBar.current_progress.stop()
+    except Exception:  # noqa: BLE001 - never let cosmetics block the gate
+        pass
+
     totals = {m: sum(s for _p, s in e) for m, e in rows.items()}
 
     while True:
@@ -184,7 +217,7 @@ def review_selection(console, details, *, total: int) -> Selection:
         )
 
         try:
-            raw = console.input("review> ").strip().lower()
+            raw = _ask(console, "review> ")
         except (EOFError, KeyboardInterrupt):
             selection.cancelled = True
             return selection

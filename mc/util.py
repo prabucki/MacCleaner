@@ -6,6 +6,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
@@ -13,6 +14,7 @@ from typing import Iterable, Optional, Sequence
 __all__ = [
     "MC_HOME",
     "terminate_group",
+    "restore_terminal",
     "iso_stamp",
     "human",
     "path_size",
@@ -90,6 +92,56 @@ def path_size(target: Path) -> int:
     return total
 
 
+def restore_terminal() -> None:
+    """
+    Put the controlling terminal back into a sane line discipline.
+
+    Interactive tools read single keypresses by switching the terminal to raw mode —
+    topgrade's "Continue? (Y)es/(N)o" prompt does exactly this. If such a child is killed
+    before it restores the settings, the terminal is left with ICANON, ECHO and ISIG off:
+    typing produces nothing, Enter does not submit, and Ctrl-C echoes as ``^C`` instead of
+    raising SIGINT. Every later program in that window inherits it, so the damage outlives
+    the process that caused it.
+
+    Cheap to call and safe when there is no terminal, so callers do not need to check.
+    """
+
+    try:
+        import termios
+    except ImportError:  # pragma: no cover - non-POSIX
+        return
+
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            fd = stream.fileno()
+            if not os.isatty(fd):
+                continue
+            attrs = termios.tcgetattr(fd)
+            attrs[3] |= termios.ICANON | termios.ECHO | termios.ISIG  # lflag
+            termios.tcsetattr(fd, termios.TCSADRAIN, attrs)
+            return
+        except (AttributeError, ValueError, OSError, termios.error):
+            continue
+
+
+def finally_restore(saved, stream: bool) -> None:
+    """Put terminal settings back after a streamed child, however it ended."""
+
+    if not stream:
+        return
+
+    if saved is not None:
+        try:
+            import termios
+
+            termios.tcsetattr(saved[0], termios.TCSADRAIN, saved[1])
+            return
+        except Exception:  # noqa: BLE001 - fall through to the generic repair
+            pass
+
+    restore_terminal()
+
+
 def terminate_group(process: subprocess.Popen, *, grace: int = 5) -> None:
     """
     Stop a child and everything it spawned, politely first.
@@ -144,6 +196,18 @@ def run(
 
     shell = isinstance(command, str)
 
+    # A streaming child shares this terminal and may switch it to raw mode. Snapshot the
+    # settings so they can be put back even if the child is killed mid-prompt.
+    saved_termios = None
+    if stream:
+        try:
+            import termios
+
+            if os.isatty(sys.stdin.fileno()):
+                saved_termios = (sys.stdin.fileno(), termios.tcgetattr(sys.stdin.fileno()))
+        except Exception:  # noqa: BLE001 - no terminal, or not POSIX
+            saved_termios = None
+
     merged_env = dict(os.environ)
     if env:
         merged_env.update(env)
@@ -166,6 +230,7 @@ def run(
         terminate_group(process)
         stdout, stderr = process.communicate()
         stderr = (stderr or "") + f"\n[mc] timed out after {timeout}s and was killed"
+        finally_restore(saved_termios, stream)
     except KeyboardInterrupt:
         # start_new_session puts the child in its own process group, so the terminal's
         # Ctrl-C never reaches it. Without this the interrupt kills mc and leaves the
@@ -176,7 +241,10 @@ def run(
             process.communicate(timeout=5)
         except (subprocess.TimeoutExpired, ValueError):  # pragma: no cover - already dead
             pass
+        finally_restore(saved_termios, stream)
         raise
+
+    finally_restore(saved_termios, stream)
 
     completed = subprocess.CompletedProcess(
         args=command, returncode=process.returncode, stdout=stdout or "", stderr=stderr or ""

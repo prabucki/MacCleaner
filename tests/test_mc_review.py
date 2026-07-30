@@ -20,7 +20,13 @@ HOME = os.path.expanduser("~")
 
 
 class ScriptedConsole(Console):
-    """A console that answers prompts from a queue instead of a keyboard."""
+    """
+    A console that discards output and answers prompts from a queue.
+
+    The review loop reads with the builtin ``input()`` rather than ``Console.input`` — a
+    stray Live display repaints over anything rendered through the console — so the queue
+    is installed by patching ``builtins.input``, which keeps the real code path under test.
+    """
 
     def __init__(self, answers):
         # Same theme as the real console: the renderer uses [info]/[success]/[danger]
@@ -38,9 +44,20 @@ class ScriptedConsole(Console):
         self._answers = list(answers)
         self.asked = 0
 
-    def input(self, *_args, **_kwargs) -> str:  # type: ignore[override]
-        self.asked += 1
-        return self._answers.pop(0) if self._answers else "go"
+    def install(self, monkeypatch):
+        """Point builtins.input at this console's answer queue."""
+
+        def fake_input(*_a, **_k):
+            self.asked += 1
+            if not self._answers:
+                return "go"
+            answer = self._answers.pop(0)
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        return self
 
 
 def _details():
@@ -87,8 +104,8 @@ def test_is_interactive_survives_closed_streams(monkeypatch):
 # --------------------------------------------------------------------------------------
 
 
-def test_accepting_immediately_excludes_nothing():
-    console = ScriptedConsole(["go"])
+def test_accepting_immediately_excludes_nothing(monkeypatch):
+    console = ScriptedConsole(["go"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
@@ -96,66 +113,72 @@ def test_accepting_immediately_excludes_nothing():
     assert not selection.cancelled
 
 
-def test_toggling_a_module_excludes_it():
+def test_toggling_a_module_excludes_it(monkeypatch):
     # electron_apps is listed first (1000 bytes vs 500).
-    console = ScriptedConsole(["1", "go"])
+    console = ScriptedConsole(["1", "go"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
     assert selection.excluded_modules == {"electron_apps"}
 
 
-def test_toggling_twice_restores_it():
-    console = ScriptedConsole(["1", "1", "go"])
+def test_toggling_twice_restores_it(monkeypatch):
+    console = ScriptedConsole(["1", "1", "go"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
     assert selection.is_empty
 
 
-def test_none_then_all_round_trips():
-    console = ScriptedConsole(["none", "all", "go"])
+def test_none_then_all_round_trips(monkeypatch):
+    console = ScriptedConsole(["none", "all", "go"]).install(monkeypatch)
 
     assert review_selection(console, _details(), total=1500).is_empty
 
 
-def test_none_excludes_every_module():
-    console = ScriptedConsole(["none", "go"])
+def test_none_excludes_every_module(monkeypatch):
+    console = ScriptedConsole(["none", "go"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
     assert selection.excluded_modules == {"electron_apps", "browsers"}
 
 
-def test_cancelling_reports_cancelled():
-    console = ScriptedConsole(["q"])
+def test_cancelling_reports_cancelled(monkeypatch):
+    console = ScriptedConsole(["q"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
     assert selection.cancelled
 
 
-def test_ctrl_c_cancels_rather_than_proceeding():
-    class Interrupting(ScriptedConsole):
-        def input(self, *_a, **_k):
-            raise KeyboardInterrupt
+def test_ctrl_c_cancels_rather_than_proceeding(monkeypatch):
+    console = ScriptedConsole([KeyboardInterrupt()]).install(monkeypatch)
 
-    selection = review_selection(Interrupting([]), _details(), total=1500)
+    selection = review_selection(console, _details(), total=1500)
 
     assert selection.cancelled, "an interrupt must never be read as consent"
 
 
-def test_garbage_input_is_ignored_not_obeyed():
-    console = ScriptedConsole(["banana", "99", "-1", "go"])
+def test_eof_cancels_rather_than_proceeding(monkeypatch):
+    """Ctrl-D at the prompt must not be read as approval either."""
+
+    console = ScriptedConsole([EOFError()]).install(monkeypatch)
+
+    assert review_selection(console, _details(), total=1500).cancelled
+
+
+def test_garbage_input_is_ignored_not_obeyed(monkeypatch):
+    console = ScriptedConsole(["banana", "99", "-1", "go"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
     assert selection.is_empty
 
 
-def test_drilling_in_excludes_one_location():
+def test_drilling_in_excludes_one_location(monkeypatch):
     # d1 -> locations of electron_apps; 1 toggles the largest (Ferdium); back; go
-    console = ScriptedConsole(["d1", "1", "back", "go"])
+    console = ScriptedConsole(["d1", "1", "back", "go"]).install(monkeypatch)
 
     selection = review_selection(console, _details(), total=1500)
 
@@ -168,7 +191,7 @@ def test_drilling_in_excludes_one_location():
 # --------------------------------------------------------------------------------------
 
 
-def test_excludes_path_matches_children_not_siblings():
+def test_excludes_path_matches_children_not_siblings(monkeypatch):
     selection = Selection(excluded_prefixes={f"{HOME}/Library/Application Support/Ferdium"})
 
     assert selection.excludes_path(f"{HOME}/Library/Application Support/Ferdium")

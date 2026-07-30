@@ -44,7 +44,7 @@ from mc.quarantine import QuarantineBatch  # noqa: E402
 from mc.registry import REGISTRY, collect, select  # noqa: E402
 from mc.report import RunReport  # noqa: E402
 from mc.runtime import Runtime  # noqa: E402
-from mc.util import human  # noqa: E402
+from mc.util import human, restore_terminal  # noqa: E402
 
 __all__ = ["main", "build_parser"]
 
@@ -355,6 +355,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _run(args, privileged: Privileged) -> int:
+    from mc.review import is_interactive
+
+    # Start from a clean screen on a manual run, and undo any raw-mode left behind by a
+    # previously-killed interactive tool. Never on a scheduled run: clearing writes escape
+    # sequences into the launchd log for no benefit.
+    if is_interactive() and not args.no_review:
+        restore_terminal()
+        console.clear()
+
     report = RunReport(
         profile=args.profile, dry_run=args.dry_run, quarantine=not args.no_quarantine
     )

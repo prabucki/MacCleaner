@@ -91,3 +91,53 @@ def test_env_additions_reach_the_child():
     result = run(["/bin/sh", "-c", "echo $MC_TEST_VAR"], timeout=10, env={"MC_TEST_VAR": "present"})
 
     assert result.stdout.strip() == "present"
+
+
+# --------------------------------------------------------------------------------------
+# Terminal state
+# --------------------------------------------------------------------------------------
+
+
+def test_restore_terminal_repairs_raw_mode(monkeypatch):
+    """
+    A killed child that was reading single keypresses leaves the tty in raw mode.
+
+    ICANON, ECHO and ISIG all off means the next prompt accepts nothing and Ctrl-C
+    echoes as text instead of interrupting — the user is stranded with no way out.
+    topgrade's "Continue? (Y)es/(N)o" does exactly this, and SIGKILL gives it no chance
+    to put things back.
+    """
+
+    import io
+    import pty
+    import termios
+
+    from mc.util import restore_terminal
+
+    primary, secondary = pty.openpty()
+    try:
+        attrs = termios.tcgetattr(secondary)
+        attrs[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)  # go raw
+        termios.tcsetattr(secondary, termios.TCSANOW, attrs)
+
+        assert not termios.tcgetattr(secondary)[3] & termios.ISIG, "setup failed"
+
+        # restore_terminal() works on sys.stdin, so point that at the raw pty.
+        monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.FileIO(secondary, "r+")))
+        restore_terminal()
+
+        lflag = termios.tcgetattr(secondary)[3]
+        assert lflag & termios.ICANON, "line editing not restored"
+        assert lflag & termios.ECHO, "echo not restored"
+        assert lflag & termios.ISIG, "Ctrl-C would still not interrupt"
+    finally:
+        os.close(primary)
+
+
+def test_restore_terminal_is_safe_without_a_tty(monkeypatch):
+    import io
+
+    from mc.util import restore_terminal
+
+    monkeypatch.setattr("sys.stdin", io.StringIO())
+    restore_terminal()  # must not raise
