@@ -28,6 +28,30 @@ electron_apps  10.93 GB
 
 Add `--breakdown-all` to list every path instead.
 
+### Reviewing before it runs
+
+A manual `mc` run stops and shows the same plan, letting you deselect anything before
+a single file is touched:
+
+```
+Review before deleting — 25.85 GB selected
+  #        Module                   Size  Locations
+  1    on  electron_apps         9.63 GB         58
+  2    on  communication_apps    9.50 GB         52
+  3    on  user_caches           4.31 GB          2
+  4  skip  unified_log                 —          1
+
+numbers toggle a module · d <n> pick locations inside one · all / none · go to run · q to cancel
+review>
+```
+
+`d 1` drills into a module to deselect individual locations. `q` or Ctrl-C cancels
+without deleting anything.
+
+The gate appears **only when stdin and stdout are both terminals**, so a scheduled run
+never blocks waiting for input. Skip it with `--no-review` or `--yes`; force it in a
+pipeline with `--review`.
+
 ---
 
 ## What it replaces

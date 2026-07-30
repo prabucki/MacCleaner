@@ -127,6 +127,14 @@ def build_parser(defaults=None) -> argparse.ArgumentParser:
         help="abort if free space is below this many bytes",
     )
     how.add_argument("--yes", "-y", action="store_true", help="assume yes (default when not on a terminal)")
+    how.add_argument(
+        "--review",
+        action="store_true",
+        help="show the plan and let you deselect parts before deleting (default on a terminal)",
+    )
+    how.add_argument(
+        "--no-review", action="store_true", help="skip the interactive review even on a terminal"
+    )
 
     out = parser.add_argument_group("output")
     out.add_argument("-v", "--verbose", action="store_true", help="list every path as it is processed")
@@ -432,7 +440,14 @@ def _run(args, privileged: Privileged) -> int:
     )
 
     # -- 5. accounting -----------------------------------------------------------------
-    want_detail = args.breakdown or args.breakdown_all
+    from mc.review import is_interactive as _interactive
+
+    want_detail = (
+        args.breakdown
+        or args.breakdown_all
+        or args.review
+        or (not args.dry_run and _interactive() and not args.no_review and not args.yes)
+    )
     details: dict = {} if want_detail else None
 
     estimated = _estimate(collector, runtime, verbose=args.verbose, details=details)
@@ -453,7 +468,37 @@ def _run(args, privileged: Privileged) -> int:
         _finish(report, args)
         return 0
 
-    # -- 6. execution ------------------------------------------------------------------
+    # -- 6. review gate ----------------------------------------------------------------
+    from mc.review import is_interactive, review_selection
+
+    selection = None
+    wants_review = args.review or (is_interactive() and not args.no_review and not args.yes)
+
+    if wants_review:
+        if details is None:
+            details = {}
+            _estimate(collector, runtime, verbose=False, details=details)
+
+        selection = review_selection(console, details, total=estimated)
+
+        if selection.cancelled:
+            console.print("[warning]Cancelled — nothing was deleted.[/warning]")
+            set_runtime(None)
+            if batch is not None:
+                batch.close()
+            return 1
+
+        if not selection.is_empty:
+            runtime.selection = selection
+            for name in sorted(selection.excluded_modules):
+                report.module(name).status = "skipped"
+                report.module(name).reason = "deselected at review"
+            report.warn(
+                f"{len(selection.excluded_modules)} module(s) and "
+                f"{len(selection.excluded_prefixes)} location(s) deselected at review"
+            )
+
+    # -- 7. execution ------------------------------------------------------------------
     try:
         _execute(collector, report)
     finally:
@@ -463,7 +508,7 @@ def _run(args, privileged: Privileged) -> int:
 
     report.free_after = free_space()
 
-    # -- 7. report ---------------------------------------------------------------------
+    # -- 8. report ---------------------------------------------------------------------
     _finish(report, args, batch=batch)
 
     return 0

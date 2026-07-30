@@ -49,11 +49,15 @@ class Runtime:
         batch: Optional[QuarantineBatch],
         report: RunReport,
         dry_run: bool = False,
+        selection=None,
     ):
         self.privileged = privileged
         self.batch = batch
         self.report = report
         self.dry_run = dry_run
+        #: Optional mc.review.Selection excluding modules or locations the user
+        #: deselected at the review gate. None means "delete everything collected".
+        self.selection = selection
 
     # -- entry point -------------------------------------------------------------------
 
@@ -67,7 +71,18 @@ class Runtime:
         """
 
         pattern = path_module.get_path.as_posix()
-        result = self.report.module(getattr(path_module, "owner", "unknown"))
+        owner = getattr(path_module, "owner", "unknown")
+        result = self.report.module(owner)
+
+        if self.selection is not None:
+            if owner in self.selection.excluded_modules:
+                return
+
+            # A privileged pattern is expanded inside mc-root, so individual paths
+            # cannot be filtered here. Skip the whole rule rather than delete something
+            # the user deselected.
+            if path_module.is_privileged and self.selection.excludes_path(pattern):
+                return
 
         use_quarantine = path_module.quarantine_preference
         if use_quarantine is None:
@@ -96,6 +111,9 @@ class Runtime:
         """Delete or stage paths the current user owns."""
 
         for concrete in self._expand(pattern):
+            if self.selection is not None and self.selection.excludes_path(str(concrete)):
+                continue
+
             verdict = policy.check(str(concrete), privileged=False, override=override)
             if not verdict.allowed:
                 result.paths_denied.append({"path": str(concrete), "reason": verdict.reason or "denied"})
