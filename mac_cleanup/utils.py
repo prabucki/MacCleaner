@@ -47,6 +47,16 @@ def cmd(command: str, *, ignore_errors: bool = True, timeout: Optional[int] = No
         except (ProcessLookupError, PermissionError):  # pragma: no cover - exit race
             process.kill()
         out_tuple = process.communicate()
+    except KeyboardInterrupt:
+        # MacCleaner patch: the child is in its own process group, so the terminal's
+        # Ctrl-C never reaches it. Forward the signal before letting the interrupt
+        # propagate, or the child keeps running after the user thinks they aborted.
+        try:
+            os.killpg(os.getpgid(process.pid), SIGKILL)
+        except (ProcessLookupError, PermissionError):  # pragma: no cover - exit race
+            process.kill()
+        process.communicate()
+        raise
 
     # Cast correct type on out_tuple
     out_tuple = cast(tuple[Optional[bytes], Optional[bytes]], out_tuple)

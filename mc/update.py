@@ -88,11 +88,21 @@ def _topgrade(report: RunReport, privileged: Privileged, *, verbose: bool, timeo
     if verbose:
         argv.append("--show-skipped")
 
-    console.print("  running topgrade...")
+    from mc.review import is_interactive
+
+    # Stream topgrade's own output when someone is watching. Capturing it made a step
+    # that routinely takes several minutes look like a hang: one "running topgrade..."
+    # line and then silence, with no way to tell progress from a stall.
+    interactive = is_interactive()
+
+    console.print(
+        f"  [info]running topgrade[/info] "
+        f"[dim](up to {timeout // 60} min · Ctrl-C aborts · skip it next time with --no-update)[/dim]"
+    )
 
     # SUDO_ASKPASS lets the cask/pkg steps escalate without a TTY prompt. Without it
     # those steps fail fast rather than hanging, which is the behaviour we want.
-    completed = run(argv, timeout=timeout, env=privileged.askpass_env)
+    completed = run(argv, timeout=timeout, env=privileged.askpass_env, stream=interactive)
 
     if completed.returncode != 0:
         tail = (completed.stderr or completed.stdout or "").strip().splitlines()

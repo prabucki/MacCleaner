@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Iterable, Optional, Sequence
 
 __all__ = [
     "MC_HOME",
+    "terminate_group",
     "iso_stamp",
     "human",
     "path_size",
@@ -88,6 +90,33 @@ def path_size(target: Path) -> int:
     return total
 
 
+def terminate_group(process: subprocess.Popen, *, grace: int = 5) -> None:
+    """
+    Stop a child and everything it spawned, politely first.
+
+    Children run in their own process group (see :func:`run`), so a plain ``kill`` would
+    leave grandchildren orphaned. SIGTERM gives the tool a chance to clean up — important
+    when it is a package manager mid-operation — before SIGKILL.
+    """
+
+    try:
+        pgid = os.getpgid(process.pid)
+    except (ProcessLookupError, PermissionError):
+        return
+
+    for signal_number in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, signal_number)
+        except (ProcessLookupError, PermissionError):
+            return
+
+        try:
+            process.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+
 def run(
     command: Sequence[str] | str,
     *,
@@ -95,6 +124,7 @@ def run(
     check: bool = False,
     env: Optional[dict] = None,
     cwd: Optional[Path] = None,
+    stream: bool = False,
 ) -> subprocess.CompletedProcess:
     """
     Run a command with a hard timeout, killing the whole process group on expiry.
@@ -106,7 +136,10 @@ def run(
     :param command: Argument list, or a string to be run through the shell.
     :param timeout: Seconds before the process group is killed.
     :param check: Raise :class:`subprocess.CalledProcessError` on non-zero exit.
-    :return: The completed process, with stdout/stderr captured as text.
+    :param stream: Let the child write straight to this process's stdout/stderr instead
+        of capturing. Use for long interactive steps so the user can see progress; the
+        returned stdout is empty.
+    :return: The completed process, with stdout/stderr captured as text (unless ``stream``).
     """
 
     shell = isinstance(command, str)
@@ -118,8 +151,8 @@ def run(
     process = subprocess.Popen(
         command,
         shell=shell,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=None if stream else subprocess.PIPE,
+        stderr=None if stream else subprocess.PIPE,
         text=True,
         errors="replace",
         env=merged_env,
@@ -130,12 +163,20 @@ def run(
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        try:
-            os.killpg(os.getpgid(process.pid), 9)
-        except (ProcessLookupError, PermissionError):  # pragma: no cover - race on exit
-            process.kill()
+        terminate_group(process)
         stdout, stderr = process.communicate()
         stderr = (stderr or "") + f"\n[mc] timed out after {timeout}s and was killed"
+    except KeyboardInterrupt:
+        # start_new_session puts the child in its own process group, so the terminal's
+        # Ctrl-C never reaches it. Without this the interrupt kills mc and leaves the
+        # child running detached, still writing to the terminal — which reads as "Ctrl-C
+        # does nothing". Forward it explicitly, then let the interrupt propagate.
+        terminate_group(process)
+        try:
+            process.communicate(timeout=5)
+        except (subprocess.TimeoutExpired, ValueError):  # pragma: no cover - already dead
+            pass
+        raise
 
     completed = subprocess.CompletedProcess(
         args=command, returncode=process.returncode, stdout=stdout or "", stderr=stderr or ""
