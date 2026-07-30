@@ -393,19 +393,22 @@ def _run(args, privileged: Privileged) -> int:
                 f"Purged [success]{human(report.quarantine_purged)}[/success] of expired quarantine."
             )
 
-    # -- 3. update phase ---------------------------------------------------------------
-    if not args.no_update:
-        from mc.update import run_updates
-
-        run_updates(
-            report=report,
-            privileged=privileged,
-            dry_run=args.dry_run,
-            verbose=args.verbose,
-            os_updates=args.os_updates,
-        )
-
+    # -- 3. update-only short circuit ---------------------------------------------------
+    # A normal run defers updates until after the review gate (see phase 7), so the plan
+    # is on screen within seconds instead of behind a multi-minute topgrade. --update-only
+    # has no plan to review, so it runs here and exits.
     if args.update_only:
+        if not args.no_update:
+            from mc.update import run_updates
+
+            run_updates(
+                report=report,
+                privileged=privileged,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                os_updates=args.os_updates,
+            )
+
         report.free_after = free_space()
         _finish(report, args)
         return 0
@@ -479,6 +482,12 @@ def _run(args, privileged: Privileged) -> int:
             details = {}
             _estimate(collector, runtime, verbose=False, details=details)
 
+        if not args.no_update:
+            console.print(
+                "[dim]Updates (topgrade) run after you approve, before deleting. The homebrew"
+                " figure is measured before `brew cleanup`, so it reads a little high.[/dim]"
+            )
+
         selection = review_selection(console, details, total=estimated)
 
         if selection.cancelled:
@@ -498,7 +507,22 @@ def _run(args, privileged: Privileged) -> int:
                 f"{len(selection.excluded_prefixes)} location(s) deselected at review"
             )
 
-    # -- 7. execution ------------------------------------------------------------------
+    # -- 7. update phase ----------------------------------------------------------------
+    # Deliberately after the review gate: the plan reaches the screen in seconds, and
+    # cancelling costs nothing. The trade-off is that `brew cleanup` has not run yet when
+    # the homebrew module was measured, so that one estimate reads slightly high.
+    if not args.no_update:
+        from mc.update import run_updates
+
+        run_updates(
+            report=report,
+            privileged=privileged,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            os_updates=args.os_updates,
+        )
+
+    # -- 8. execution ------------------------------------------------------------------
     try:
         _execute(collector, report)
     finally:
@@ -508,7 +532,7 @@ def _run(args, privileged: Privileged) -> int:
 
     report.free_after = free_space()
 
-    # -- 8. report ---------------------------------------------------------------------
+    # -- 9. report ---------------------------------------------------------------------
     _finish(report, args, batch=batch)
 
     return 0

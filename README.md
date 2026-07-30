@@ -226,9 +226,13 @@ mc --no-update      # clean only — skip topgrade entirely
 mc --update-only    # update only
 ```
 
-The update phase runs first and can take several minutes. On a terminal, topgrade's
-output is streamed live so you can see progress, and **Ctrl-C aborts it** — the child is
-signalled, not just MacCleaner. If you only want to clean, `--no-update` skips it.
+Updates run **after** the review gate, so the plan is on screen within a second rather
+than behind a multi-minute topgrade — cancel there and nothing has run. The trade-off is
+that `brew cleanup` has not happened yet when the homebrew module is measured, so that
+one estimate reads slightly high; the gate says so.
+
+On a terminal topgrade's output streams live, and **Ctrl-C aborts it** — the child is
+signalled, not just MacCleaner. `--no-update` skips it entirely.
 
 ---
 

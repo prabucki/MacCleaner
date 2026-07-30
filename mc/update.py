@@ -102,7 +102,15 @@ def _topgrade(report: RunReport, privileged: Privileged, *, verbose: bool, timeo
 
     # SUDO_ASKPASS lets the cask/pkg steps escalate without a TTY prompt. Without it
     # those steps fail fast rather than hanging, which is the behaviour we want.
-    completed = run(argv, timeout=timeout, env=privileged.askpass_env, stream=interactive)
+    #
+    # TOPGRADE_SKIP_BRKC_NOTIFY suppresses the "Topgrade vN Breaking Changes … Continue?
+    # (Y)es/(N)o" prompt, which --yes does not cover. It only surfaced once output was
+    # streamed to a real terminal, but it would block a scheduled run just the same —
+    # topgrade would sit waiting for an answer nobody is there to give.
+    update_env = dict(privileged.askpass_env)
+    update_env["TOPGRADE_SKIP_BRKC_NOTIFY"] = "true"
+
+    completed = run(argv, timeout=timeout, env=update_env, stream=interactive)
 
     if completed.returncode != 0:
         tail = (completed.stderr or completed.stdout or "").strip().splitlines()
