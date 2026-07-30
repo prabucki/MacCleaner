@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Weekly MacCleaner run.
+
+  Installed by `./install.sh --schedule`, which substitutes @@MC@@ and @@HOME@@.
+
+  A LaunchAgent (not a LaunchDaemon) on purpose: it runs in your GUI session, so it can
+  reach the login Keychain for the askpass credential and inherits your Full Disk Access
+  grant. A daemon would have neither.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.prabucki.maccleaner</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>@@MC@@</string>
+        <string>--profile</string>
+        <string>aggressive</string>
+        <string>--on-ac-only</string>
+        <string>--snapshot</string>
+    </array>
+
+    <!-- Sunday 03:00. Missed runs (asleep, powered off) fire at the next wake. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Never on load: installing the agent must not immediately start deleting things. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>@@HOME@@/.maccleaner/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>@@HOME@@/.maccleaner/logs/launchd.err.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>@@HOME@@</string>
+
+    <!--
+      launchd starts with an almost empty environment. bin/mc extends PATH itself, but
+      setting it here too means a failure is a clear "command not found" rather than a
+      silent no-op update phase.
+    -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>@@HOME@@</string>
+    </dict>
+
+    <!-- Cleaning is not urgent; stay out of the way of anything the user is doing. -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>LowPriorityIO</key>
+    <true/>
+
+    <!-- A run that has not finished in two hours is stuck. -->
+    <key>ExitTimeOut</key>
+    <integer>7200</integer>
+</dict>
+</plist>

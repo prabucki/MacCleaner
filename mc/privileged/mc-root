@@ -1,0 +1,534 @@
+#!/usr/bin/python3
+# -*- coding: utf-8 -*-
+"""
+mc-root — the only part of MacCleaner that runs as root.
+
+Invoked exclusively through a NOPASSWD sudoers rule pointing at its installed absolute
+path. That grant is what makes unattended operation possible, so this file is written to
+be small enough to audit in one sitting and to assume the caller is hostile.
+
+Design rules, in order of importance:
+
+1. **The caller is not trusted.** Every path argument is re-validated against
+   ``policy.py`` *here*, as root, after glob expansion. A compromised user-side process
+   can ask for anything; it will only ever get what the allowlist already permitted.
+2. **Fixed verb vocabulary.** There is no "run this command" verb. Adding a capability
+   means adding a verb here, which means editing a root-owned file.
+3. **Root-owned code only.** Both this file and ``policy.py`` are checked for safe
+   ownership and permissions at startup. ``/usr/bin/python3`` is used rather than the
+   Homebrew interpreter because ``/opt/homebrew`` is writable by the unprivileged user
+   and would otherwise be a trivial escalation path.
+4. **No symlink traversal.** Paths are removed with ``lstat`` semantics, and any path
+   whose realpath differs from its lexical form is re-checked before it is touched.
+
+Interpreter is macOS's system Python (3.9 on macOS 26), so this file must stay
+3.9-compatible and stdlib-only.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+
+VERSION = "1.0.0"
+
+_HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+# --------------------------------------------------------------------------------------
+# Startup hardening
+# --------------------------------------------------------------------------------------
+
+
+def _fail(message):
+    sys.stderr.write("mc-root: %s\n" % message)
+    sys.exit(2)
+
+
+def _assert_safe_file(path):
+    """
+    Refuse to execute if this file or its policy can be modified by a non-root user.
+
+    Without this check the NOPASSWD grant would be equivalent to a root shell the moment
+    anything under the install directory became user-writable.
+    """
+
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        _fail("cannot stat %s: %s" % (path, exc))
+
+    if info.st_uid != 0:
+        _fail("%s is not owned by root (uid %d) - refusing to run" % (path, info.st_uid))
+
+    if info.st_mode & 0o022:
+        _fail("%s is group- or world-writable (mode %o) - refusing to run" % (path, info.st_mode & 0o777))
+
+
+def _load_policy():
+    """Import ``policy`` from a directory that has passed the ownership check."""
+
+    for candidate in (_HERE, os.path.dirname(_HERE)):
+        module_path = os.path.join(candidate, "policy.py")
+        if os.path.isfile(module_path):
+            if os.geteuid() == 0:
+                _assert_safe_file(candidate)
+                _assert_safe_file(module_path)
+            sys.path.insert(0, candidate)
+            import policy as policy_module
+
+            return policy_module
+
+    _fail("policy.py not found next to %s" % _HERE)
+
+
+def _invoking_user():
+    """
+    Identify the real user behind ``sudo``.
+
+    Required so that ``~`` in the policy resolves to the user's home rather than
+    ``/var/root``, and so quarantine destinations can be confined to that home.
+    """
+
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_user = os.environ.get("SUDO_USER")
+
+    if sudo_uid is None and sudo_user is None:
+        if os.geteuid() != 0:
+            # Running unprivileged (tests, --self-check): fall back to the current user.
+            return pwd.getpwuid(os.getuid())
+        _fail("must be invoked via sudo by a real user")
+
+    try:
+        if sudo_uid is not None:
+            return pwd.getpwuid(int(sudo_uid))
+        return pwd.getpwnam(sudo_user)
+    except (KeyError, ValueError) as exc:
+        _fail("cannot resolve invoking user: %s" % exc)
+
+
+if os.geteuid() == 0:
+    _assert_safe_file(os.path.realpath(__file__))
+
+policy = _load_policy()
+USER = _invoking_user()
+
+# Make the policy evaluate against the invoking user's home, not root's.
+os.environ["MACCLEANER_HOME"] = USER.pw_dir
+
+QUARANTINE_ROOT = os.path.join(USER.pw_dir, ".maccleaner", "quarantine")
+
+
+# --------------------------------------------------------------------------------------
+# Path vetting
+# --------------------------------------------------------------------------------------
+
+
+def _vet(candidates):
+    """
+    Expand globs and keep only the concrete paths the policy permits root to delete.
+
+    :param candidates: Raw path arguments from the caller.
+    :return: ``(approved_paths, denials)`` where denials are ``{"path", "reason"}`` dicts.
+    """
+
+    from glob import glob
+
+    approved = []
+    denials = []
+
+    for raw in candidates:
+        # Vet the pattern itself first, so an obviously-illegal request is rejected even
+        # when it currently happens to match nothing on disk.
+        pattern_reason = policy.is_privileged_allowed(raw)
+        if pattern_reason is not None:
+            denials.append({"path": raw, "reason": pattern_reason})
+            continue
+
+        expanded = policy.expand(raw)
+        matches = glob(expanded) if any(ch in expanded for ch in "*?[") else [expanded]
+
+        for match in matches:
+            if not os.path.lexists(match):
+                continue
+
+            reason = policy.is_privileged_allowed(match)
+            if reason is not None:
+                denials.append({"path": match, "reason": reason})
+                continue
+
+            escape = policy.resolve_escapes(match)
+            if escape is not None:
+                denials.append({"path": match, "reason": escape})
+                continue
+
+            approved.append(match)
+
+    return approved, denials
+
+
+def _size_of(path):
+    """Byte size of a path, never following symlinks or crossing mount points."""
+
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return 0
+
+    if not os.path.isdir(path) or os.path.islink(path):
+        return info.st_size
+
+    total = 0
+    for root, dirs, files in os.walk(path, followlinks=False):
+        dirs[:] = [d for d in dirs if not os.path.ismount(os.path.join(root, d))]
+        for name in files + dirs:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                continue
+
+    return total
+
+
+def _remove(path):
+    """Remove a file, symlink or directory tree without following links."""
+
+    if os.path.islink(path) or not os.path.isdir(path):
+        os.unlink(path)
+    else:
+        shutil.rmtree(path, ignore_errors=False)
+
+
+def _run(argv, timeout=600):
+    """Run a fixed command, capturing output. No shell, ever."""
+
+    try:
+        completed = subprocess.run(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, universal_newlines=True
+        )
+        return completed.returncode, (completed.stdout or "").strip()
+    except subprocess.TimeoutExpired:
+        return 124, "timed out after %ss" % timeout
+    except OSError as exc:
+        return 127, str(exc)
+
+
+def _emit(payload):
+    """Write the machine-readable result the client parses."""
+
+    json.dump(payload, sys.stdout)
+    sys.stdout.write("\n")
+
+
+# --------------------------------------------------------------------------------------
+# Verbs
+# --------------------------------------------------------------------------------------
+
+
+def verb_rm_paths(argv):
+    """Delete allowlisted paths outright."""
+
+    approved, denials = _vet(argv)
+    removed, freed, errors = [], 0, []
+
+    for path in approved:
+        size = _size_of(path)
+        try:
+            _remove(path)
+            removed.append(path)
+            freed += size
+        except OSError as exc:
+            errors.append({"path": path, "reason": str(exc)})
+
+    _emit({"removed": removed, "bytes": freed, "denied": denials, "errors": errors})
+
+
+def verb_stage_paths(argv):
+    """
+    Move allowlisted paths into a quarantine batch owned by the invoking user.
+
+    The destination is confined to that user's quarantine root, so this verb cannot be
+    used to relocate a system file to an attacker-chosen location.
+    """
+
+    if not argv:
+        _fail("stage-paths requires <batch-dir> <path>...")
+
+    batch_dir = os.path.realpath(policy.expand(argv[0]))
+    if not (batch_dir + os.sep).startswith(os.path.realpath(QUARANTINE_ROOT) + os.sep):
+        _fail("staging destination %s is outside %s" % (batch_dir, QUARANTINE_ROOT))
+
+    payload_root = os.path.join(batch_dir, "payload")
+
+    approved, denials = _vet(argv[1:])
+    staged, total, errors = [], 0, []
+
+    for path in approved:
+        size = _size_of(path)
+        destination = os.path.join(payload_root, path.lstrip("/"))
+
+        try:
+            parent = os.path.dirname(destination)
+            if not os.path.isdir(parent):
+                os.makedirs(parent)
+                # Directories we create on the way must belong to the user, or they will
+                # not be able to inspect or restore their own quarantine.
+                _chown_tree_to_user(parent, stop_at=batch_dir)
+
+            suffix = 1
+            unique = destination
+            while os.path.lexists(unique):
+                unique = "%s.%d" % (destination, suffix)
+                suffix += 1
+
+            shutil.move(path, unique)
+            os.lchown(unique, USER.pw_uid, USER.pw_gid)
+
+            staged.append({"original": path, "staged": unique, "size": size})
+            total += size
+        except (OSError, shutil.Error) as exc:
+            errors.append({"path": path, "reason": str(exc)})
+
+    _emit({"staged": staged, "bytes": total, "denied": denials, "errors": errors})
+
+
+def _chown_tree_to_user(leaf, stop_at):
+    """Give the user ownership of directories created inside their own quarantine batch."""
+
+    current = leaf
+    stop_at = os.path.realpath(stop_at)
+
+    while True:
+        try:
+            os.lchown(current, USER.pw_uid, USER.pw_gid)
+        except OSError:
+            return
+        if os.path.realpath(current) == stop_at or current == "/":
+            return
+        parent = os.path.dirname(current)
+        if parent == current:
+            return
+        current = parent
+
+
+def verb_unstage(argv):
+    """Move one staged path back to its original location (root-owned restore)."""
+
+    if len(argv) != 2:
+        _fail("unstage requires <staged-path> <original-path>")
+
+    source = os.path.realpath(policy.expand(argv[0]))
+    destination = policy.normalize(argv[1])
+
+    if not (source + os.sep).startswith(os.path.realpath(QUARANTINE_ROOT) + os.sep):
+        _fail("source %s is outside the quarantine root" % source)
+
+    reason = policy.is_privileged_allowed(destination)
+    if reason is not None:
+        _fail("refusing to restore to a location outside the allowlist: %s" % reason)
+
+    if os.path.lexists(destination):
+        _emit({"restored": False, "reason": "destination already exists"})
+        return
+
+    try:
+        parent = os.path.dirname(destination)
+        if not os.path.isdir(parent):
+            os.makedirs(parent)
+        shutil.move(source, destination)
+        _emit({"restored": True})
+    except (OSError, shutil.Error) as exc:
+        _emit({"restored": False, "reason": str(exc)})
+
+
+def verb_purge_quarantine(argv):
+    """Delete a whole quarantine batch, including any root-owned payload."""
+
+    if len(argv) != 1:
+        _fail("purge-quarantine requires <batch-dir>")
+
+    batch_dir = os.path.realpath(policy.expand(argv[0]))
+    if not (batch_dir + os.sep).startswith(os.path.realpath(QUARANTINE_ROOT) + os.sep):
+        _fail("%s is outside the quarantine root" % batch_dir)
+
+    size = _size_of(batch_dir)
+    try:
+        shutil.rmtree(batch_dir, ignore_errors=False)
+        _emit({"purged": batch_dir, "bytes": size})
+    except OSError as exc:
+        _emit({"purged": None, "bytes": 0, "errors": [str(exc)]})
+
+
+def verb_purge(_argv):
+    """Force inactive memory back to the free pool."""
+
+    code, output = _run(["/usr/sbin/purge"], timeout=300)
+    _emit({"verb": "purge", "code": code, "output": output})
+
+
+def verb_periodic(argv):
+    """Run the system's own maintenance scripts (the OnyX 'Automation' equivalent)."""
+
+    allowed = {"daily", "weekly", "monthly"}
+    requested = [a for a in argv if a in allowed] or ["daily", "weekly", "monthly"]
+
+    code, output = _run(["/usr/sbin/periodic"] + requested, timeout=900)
+    _emit({"verb": "periodic", "ran": requested, "code": code, "output": output})
+
+
+def verb_flush_dns(_argv):
+    """Flush the DNS cache and restart the multicast responder."""
+
+    code_a, out_a = _run(["/usr/bin/dscacheutil", "-flushcache"], timeout=60)
+    code_b, out_b = _run(["/usr/bin/killall", "-HUP", "mDNSResponder"], timeout=60)
+    _emit({"verb": "flush-dns", "code": max(code_a, code_b), "output": (out_a + " " + out_b).strip()})
+
+
+def verb_log_erase(_argv):
+    """
+    Erase the unified log store.
+
+    Routinely several gigabytes and completely invisible in Finder, which is why the
+    original shell script's ``rm -rf /private/var/log/*`` never actually reclaimed it.
+    """
+
+    code, output = _run(["/usr/bin/log", "erase", "--all"], timeout=600)
+    _emit({"verb": "log-erase", "code": code, "output": output})
+
+
+def verb_lsregister_rebuild(_argv):
+    """Rebuild the Launch Services database — fixes duplicate/stale 'Open With' entries."""
+
+    lsregister = (
+        "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/"
+        "LaunchServices.framework/Versions/A/Support/lsregister"
+    )
+    if not os.path.exists(lsregister):
+        _emit({"verb": "lsregister-rebuild", "code": 127, "output": "lsregister not present"})
+        return
+
+    code, output = _run(
+        [lsregister, "-kill", "-r", "-seed", "-domain", "local", "-domain", "system", "-domain", "user"], timeout=600
+    )
+    _emit({"verb": "lsregister-rebuild", "code": code, "output": output})
+
+
+def verb_kextcache_rebuild(_argv):
+    """Rebuild the kernel extension cache."""
+
+    _run(["/usr/bin/touch", "/System/Library/Extensions"], timeout=60)
+    code, output = _run(["/usr/sbin/kextcache", "-u", "/"], timeout=900)
+    _emit({"verb": "kextcache-rebuild", "code": code, "output": output})
+
+
+def verb_font_cache_reset(_argv):
+    """Drop the system font caches."""
+
+    code, output = _run(["/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/"
+                         "ATS.framework/Versions/A/Support/atsutil", "databases", "-remove"], timeout=120)
+    _emit({"verb": "font-cache-reset", "code": code, "output": output})
+
+
+def verb_softwareupdate(_argv):
+    """Install pending macOS updates without prompting."""
+
+    code, output = _run(
+        ["/usr/sbin/softwareupdate", "-ia", "--agree-to-license", "--no-scan"], timeout=3600
+    )
+    _emit({"verb": "softwareupdate", "code": code, "output": output})
+
+
+def verb_snapshot_create(_argv):
+    """Take an APFS local snapshot as a pre-clean safety net."""
+
+    code, output = _run(["/usr/bin/tmutil", "localsnapshot"], timeout=600)
+    _emit({"verb": "snapshot-create", "code": code, "output": output})
+
+
+def verb_snapshot_list(_argv):
+    """List Time Machine local snapshots on the boot volume."""
+
+    code, output = _run(["/usr/bin/tmutil", "listlocalsnapshots", "/"], timeout=120)
+    _emit({"verb": "snapshot-list", "code": code, "output": output})
+
+
+def verb_snapshot_delete(argv):
+    """
+    Delete a named local snapshot.
+
+    Snapshots are frequently multi-gigabyte and are not visible as files, so they are a
+    common cause of "I deleted things and free space did not change".
+    """
+
+    if len(argv) != 1:
+        _fail("snapshot-delete requires <snapshot-name>")
+
+    name = argv[0]
+    if not name.startswith("com.apple.TimeMachine.") or "/" in name:
+        _fail("refusing to delete snapshot with unexpected name: %s" % name)
+
+    code, output = _run(["/usr/bin/tmutil", "deletelocalsnapshots", name], timeout=600)
+    _emit({"verb": "snapshot-delete", "name": name, "code": code, "output": output})
+
+
+def verb_self_check(_argv):
+    """Report install health — used by ``mc doctor`` and by install.sh after setup."""
+
+    _emit(
+        {
+            "version": VERSION,
+            "euid": os.geteuid(),
+            "user": USER.pw_name,
+            "home": USER.pw_dir,
+            "policy_dir": _HERE,
+            "quarantine_root": QUARANTINE_ROOT,
+        }
+    )
+
+
+VERBS = {
+    "rm-paths": verb_rm_paths,
+    "stage-paths": verb_stage_paths,
+    "unstage": verb_unstage,
+    "purge-quarantine": verb_purge_quarantine,
+    "purge": verb_purge,
+    "periodic": verb_periodic,
+    "flush-dns": verb_flush_dns,
+    "log-erase": verb_log_erase,
+    "lsregister-rebuild": verb_lsregister_rebuild,
+    "kextcache-rebuild": verb_kextcache_rebuild,
+    "font-cache-reset": verb_font_cache_reset,
+    "softwareupdate": verb_softwareupdate,
+    "snapshot-create": verb_snapshot_create,
+    "snapshot-list": verb_snapshot_list,
+    "snapshot-delete": verb_snapshot_delete,
+    "self-check": verb_self_check,
+}
+
+
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help"):
+        sys.stderr.write("usage: mc-root <verb> [args...]\nverbs: %s\n" % ", ".join(sorted(VERBS)))
+        return 1
+
+    verb = argv[0]
+    handler = VERBS.get(verb)
+
+    if handler is None:
+        _fail("unknown verb %r" % verb)
+
+    # Bound the argument list; a runaway caller should not be able to make root chew
+    # through an unbounded worklist.
+    if len(argv) > 4096:
+        _fail("too many arguments (%d)" % len(argv))
+
+    handler(argv[1:])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

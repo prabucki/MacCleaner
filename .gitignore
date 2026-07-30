@@ -42,3 +42,10 @@ mac_cleanup/modules.toml
 
 # macOS stuff
 .DS_Store
+
+# MacCleaner
+.venv/
+.DS_Store
+*.pyc
+__pycache__/
+.pytest_cache/

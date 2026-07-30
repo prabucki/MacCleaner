@@ -17,6 +17,23 @@ from rich.prompt import Confirm
 from mac_cleanup.console import console, print_panel
 
 
+def _clear_live(target_console) -> None:
+    """
+    Drop any active Live display, tolerating rich's changed semantics.
+
+    MacCleaner patch. Up to rich 13, ``Console.clear_live()`` unconditionally reset a
+    single ``_live`` attribute. From rich 14 it pops an internal stack and raises
+    ``IndexError`` when that stack is empty — which it always is on the first call, so
+    upstream crashes on the first ``wrap_iter``. Guarding here rather than pinning rich
+    to 13.x keeps the fork working on current rich.
+    """
+
+    try:
+        target_console.clear_live()
+    except (IndexError, AttributeError):
+        pass
+
+
 class _ProgressBar:
     """Proxy rich progress bar with blocking prompt."""
 
@@ -75,7 +92,7 @@ class _ProgressBar:
 
         # Clear printed stuff
         self.current_progress.console.clear()
-        self.current_progress.console.clear_live()
+        _clear_live(self.current_progress.console)
 
         # Resume refreshing progress bar
         self.current_progress.start()
@@ -99,7 +116,7 @@ class _ProgressBar:
         """
 
         # Clear previous Live instance
-        self.current_progress.console.clear_live()
+        _clear_live(self.current_progress.console)
 
         # Get new progress instance with default stuff
         self.__init__()

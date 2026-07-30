@@ -1,0 +1,17 @@
+#!/bin/sh
+# mc-askpass — SUDO_ASKPASS provider for MacCleaner.
+#
+# Some of the work is done by third-party tools that call sudo themselves and cannot be
+# routed through the verb-limited mc-root helper — chiefly `brew upgrade --cask` for
+# casks with pkg installers, and topgrade's system-update step. Those need a real sudo
+# credential, so this reads the password from the login Keychain.
+#
+# The Keychain item is created by install.sh with an ACL restricted to this binary, so
+# other processes get a prompt rather than a silent read. It is only readable while the
+# login Keychain is unlocked, i.e. while the user is actually logged in.
+#
+# Remove the stored credential with:  security delete-generic-password -s maccleaner-sudo
+
+set -eu
+
+exec /usr/bin/security find-generic-password -w -s maccleaner-sudo -a "${USER:-$(/usr/bin/id -un)}"

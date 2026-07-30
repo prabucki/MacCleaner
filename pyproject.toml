@@ -1,12 +1,12 @@
 [tool.poetry]
-name = "mac_cleanup"
-version = "3.3.0"
-description = "Python cleanup script for macOS"
+name = "maccleaner"
+version = "1.0.0"
+description = "Comprehensive headless macOS cleanup, updates and maintenance"
 license = "Apache-2.0"
 authors = [ "efa2d19" ]
 readme = "README.md"
-homepage = "https://github.com/mac-cleanup/mac-cleanup-py"
-repository = "https://github.com/mac-cleanup/mac-cleanup-py"
+homepage = "https://github.com/prabucki/MacCleaner"
+repository = "https://github.com/prabucki/MacCleaner"
 keywords = [
     "macos",
     "script",
@@ -22,7 +22,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13"
 ]
 
-include = [ "LICENSE" ]
+packages = [ { include = "mc" }, { include = "mac_cleanup" } ]
+include = [ "LICENSE", "config/topgrade.toml" ]
 exclude = [ "mac_cleanup/__main__.py", "mac_cleanup/py.typed" ]
 
 [tool.poetry.urls]
@@ -41,6 +42,7 @@ xattr = "~1.1.4"
 
 [tool.poetry.scripts]
 mac-cleanup = "mac_cleanup:main"
+mc = "mc.cli:entrypoint"
 
 [tool.poetry.group.test.dependencies]
 tox = "~4.24.2"
@@ -91,9 +93,11 @@ version_files = [ "pyproject.toml:version" ]
 tag_format = "v$version"
 
 [tool.coverage.run]
+source = [ "mc", "mac_cleanup" ]
 omit = [
     "mac_cleanup/__main__.py",
-    "mac_cleanup/default_modules.py"
+    "mac_cleanup/default_modules.py",
+    "mc/modules/*"
 ]
 
 [tool.coverage.report]
@@ -135,5 +139,5 @@ multiline-quotes = "double"
 
 [tool.pytest.ini_options]
 minversion = "8.3.5"
-addopts = "--cov=mac_cleanup"
+addopts = ""
 testpaths = [ "tests" ]

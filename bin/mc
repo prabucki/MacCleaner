@@ -1,0 +1,34 @@
+#!/bin/bash
+#
+# MacCleaner launcher.
+#
+# Resolves the repository through any symlinks (~/.local/bin/mc and the Full Disk Access
+# path both point here), then runs the CLI out of the project virtualenv.
+#
+# A launchd context inherits almost no PATH, so the Homebrew prefixes are added
+# explicitly — without them topgrade, brew, node and friends are simply not found and
+# the update phase silently does nothing.
+
+set -euo pipefail
+
+target="${BASH_SOURCE[0]}"
+while [ -L "$target" ]; do
+    link="$(readlink "$target")"
+    case "$link" in
+        /*) target="$link" ;;
+        *)  target="$(cd "$(dirname "$target")" && pwd)/$link" ;;
+    esac
+done
+
+REPO_DIR="$(cd "$(dirname "$target")/.." && pwd)"
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+PYTHON="$REPO_DIR/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    printf 'MacCleaner: no virtualenv at %s - run ./install.sh first\n' "$REPO_DIR/.venv" >&2
+    exit 1
+fi
+
+cd "$REPO_DIR"
+exec "$PYTHON" -m mc.cli "$@"

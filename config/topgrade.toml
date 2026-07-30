@@ -1,0 +1,100 @@
+# MacCleaner's topgrade configuration — tuned for unattended runs.
+#
+# Passed explicitly with `topgrade --config`, so your own ~/.config/topgrade.toml is
+# left alone and interactive `topgrade` still behaves however you have it set up.
+#
+# Two principles:
+#   * Nothing may block. No prompts, no retry questions, no tmux, no terminal title.
+#   * Nothing may reboot or change system state behind your back. macOS system updates
+#     are disabled here on purpose — see the `system` entry in `disable` below.
+
+[misc]
+# Never prompt. This is the whole point.
+assume_yes = true
+ask_retry = false
+no_retry = true
+
+# Report what was skipped, so the log explains itself.
+show_skipped = true
+
+# Let topgrade clean up after each package manager as it goes.
+cleanup = true
+
+# MacCleaner posts its own notification with the full picture at the end.
+notify_end = "never"
+notify_each_step = false
+
+# Managed by Homebrew here; self-update would fight the package manager.
+no_self_update = true
+
+# Cosmetics that make no sense when output is going to a log file.
+set_title = false
+display_time = true
+run_in_tmux = false
+
+# Credentials come from SUDO_ASKPASS (see mc-askpass), so topgrade never needs to
+# maintain its own sudo session. Leaving sudo_loop off also avoids the documented risk
+# of a cached sudo session sitting around on an unattended machine.
+sudo_loop = false
+pre_sudo = false
+
+disable = [
+    # macOS system updates. Disabled deliberately: `softwareupdate -ia` can force a
+    # reboot with no warning, which is not something an unattended weekly cleanup should
+    # ever do. Run `mc --os-updates` when you actually want them.
+    "system",
+
+    # Pulls code. A cleanup run must not change the state of your working trees.
+    "git_repos",
+
+    # Prompts to restart services/apps.
+    "restarts",
+
+    # Not installed on this machine; listing them keeps the log free of skip noise.
+    "containers",
+    "distrobox",
+    "flatpak",
+    "snap",
+    "nix",
+    "nix_helper",
+    "home_manager",
+    "guix",
+    "pacstall",
+    "deb_get",
+    "wsl",
+    "wsl_update",
+    "winget",
+    "chocolatey",
+    "scoop",
+    "microsoft_store",
+    "powershell",
+    "vagrant",
+    "waydroid",
+    "toolbx",
+    "firmware",
+    "gnome_shell_extensions",
+    "cinnamon_spices",
+]
+
+[brew]
+# --greedy: also upgrade casks that manage their own auto-updates. This is what the
+# original MasterCleanScript did with `brew upgrade --cask --greedy`. The documented
+# trade-off is that some casks reinstall on every run because their version string does
+# not change; `mc --skip brew_greedy` turns it off if that becomes annoying.
+greedy_cask = true
+autoremove = true
+
+[git]
+# Belt and braces alongside disabling the git_repos step entirely.
+pull_predefined = false
+
+[npm]
+# Never run a package manager as root. A postinstall script with root is a bad trade.
+use_sudo = false
+
+[yarn]
+use_sudo = false
+
+[python]
+enable_pip_review = false
+enable_pipupgrade = false

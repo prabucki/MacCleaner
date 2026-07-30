@@ -1,5 +1,6 @@
 """Console argument parser configuration."""
 
+import os
 from argparse import ArgumentParser, RawTextHelpFormatter
 from typing import final
 
@@ -41,7 +42,14 @@ parser.add_argument("-f", "--force", help="Accept all warnings", action="store_t
 parser.add_argument("-v", "--verbose", help="Print folders to be deleted", action="store_true")
 
 args = Args()
-parser.parse_args(namespace=args)
+
+# MacCleaner patch: `mc` drives the collector directly and owns its own argument parser,
+# so importing this package must not consume sys.argv. parse_known_args (rather than
+# parse_args) also keeps upstream usable as a library without it exiting on stray flags.
+if os.environ.get("MAC_CLEANUP_NO_ARGPARSE"):
+    pass
+else:
+    parser.parse_known_args(namespace=args)
 
 # args.dry_run = True  # debug
 # args.configure = True  # debug

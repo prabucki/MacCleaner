@@ -44,7 +44,9 @@ class TestParser:
         """Test parser without args."""
 
         # Set empty args to parser
-        parser.parse_args(namespace=get_namespace)
+        # MacCleaner patch: pass args=[] explicitly. Without it this reads sys.argv and
+        # fails whenever pytest itself is invoked with flags, which the test never intended.
+        parser.parse_args(args=[], namespace=get_namespace)
 
         # Check there is no attrs
         assert not any(getattr(get_namespace, attr) for attr in self.get_all_args_from_namespace(get_namespace))

@@ -1,24 +1,52 @@
+import os
 from pathlib import Path
+from signal import SIGKILL
 from typing import Optional, cast
 
 from beartype import beartype  # pyright: ignore [reportUnknownVariableType]
 from xattr import xattr  # pyright: ignore [reportMissingTypeStubs]
 
 
+#: MacCleaner patch: default wall-clock ceiling for any single command, in seconds.
+#: Overridable per call, and globally via MAC_CLEANUP_CMD_TIMEOUT for slow machines.
+DEFAULT_CMD_TIMEOUT: int = int(os.environ.get("MAC_CLEANUP_CMD_TIMEOUT", "300"))
+
+
 @beartype
-def cmd(command: str, *, ignore_errors: bool = True) -> str:
+def cmd(command: str, *, ignore_errors: bool = True, timeout: Optional[int] = None) -> str:
     """
     Executes command in Popen.
 
     :param command: Bash command
     :param ignore_errors: If True, no stderr in return
+    :param timeout: Seconds before the command's process group is killed. Defaults to
+        :data:`DEFAULT_CMD_TIMEOUT`. Pass 0 to wait indefinitely.
     :return: stdout of executed command
     """
 
-    from subprocess import DEVNULL, PIPE, Popen
+    from subprocess import DEVNULL, PIPE, Popen, TimeoutExpired
 
-    # Get stdout and stderr from PIPE
-    out_tuple = Popen(command, shell=True, stdout=PIPE, stderr=(DEVNULL if ignore_errors else PIPE)).communicate()
+    # MacCleaner patch: upstream waits forever. A single hung `brew`, `docker` or network
+    # stall would wedge an unattended run with nothing to interrupt it, so every command
+    # now runs in its own process group under a timeout and the group is killed on expiry.
+    effective_timeout = DEFAULT_CMD_TIMEOUT if timeout is None else timeout
+
+    process = Popen(
+        command,
+        shell=True,
+        stdout=PIPE,
+        stderr=(DEVNULL if ignore_errors else PIPE),
+        start_new_session=True,
+    )
+
+    try:
+        out_tuple = process.communicate(timeout=effective_timeout or None)
+    except TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(process.pid), SIGKILL)
+        except (ProcessLookupError, PermissionError):  # pragma: no cover - exit race
+            process.kill()
+        out_tuple = process.communicate()
 
     # Cast correct type on out_tuple
     out_tuple = cast(tuple[Optional[bytes], Optional[bytes]], out_tuple)
