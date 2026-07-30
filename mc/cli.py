@@ -533,7 +533,7 @@ def _run(args, privileged: Privileged) -> int:
 
     # -- 8. execution ------------------------------------------------------------------
     try:
-        _execute(collector, report)
+        _execute(collector, report, selection)
     finally:
         set_runtime(None)
         if batch is not None:
@@ -582,10 +582,18 @@ def _estimate(collector: _Collector, runtime: Runtime, *, verbose: bool, details
     return total
 
 
-def _execute(collector: _Collector, report: RunReport) -> None:
+def _execute(collector: _Collector, report: RunReport, selection=None) -> None:
     """Run every collected unit."""
 
     for unit in collector._execute_list:  # noqa: SLF001
+        # Skip a unit whose every item was deselected, rather than showing a progress bar
+        # announcing work that will not happen ("Removing 871 .DS_Store files" followed by
+        # "Reclaimed 0 B" is a confusing thing to watch).
+        if selection is not None and unit.modules:
+            owners = {getattr(m, "owner", "unknown") for m in unit.modules}
+            if owners and owners <= selection.excluded_modules:
+                continue
+
         for module in ProgressBar.wrap_iter(unit.modules, description=unit.message, total=len(unit.modules)):
             owner = getattr(module, "owner", "unknown")
             set_current_module(owner)

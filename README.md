@@ -30,23 +30,30 @@ Add `--breakdown-all` to list every path instead.
 
 ### Reviewing before it runs
 
-A manual `mc` run stops and shows the same plan, letting you deselect anything before
-a single file is touched:
+A manual `mc` run stops on an arrow-key selector. Everything starts selected, so pressing
+enter runs exactly what the plan said:
 
 ```
-Review before deleting — 25.85 GB selected
-  #        Module                   Size  Locations
-  1    on  electron_apps         9.63 GB         58
-  2    on  communication_apps    9.50 GB         52
-  3    on  user_caches           4.31 GB          2
-  4  skip  unified_log                 —          1
+Select what to clean  2.68 GB
+↑↓ move · space toggle · →← expand/collapse · a all · n none · enter run · q cancel
 
-numbers toggle a module · d <n> pick locations inside one · all / none · go to run · q to cancel
-review>
+❯ [x] ▾ node  2.53 GB
+    [x] ~/Library/Caches/yarn/       1.25 GB  └ v6
+    [x] ~/.npm/_cacache/           914.54 MB  └ content-v2, index-v5
+    [x] ~/.npm/_npx/               333.01 MB  └ 15c61037b1978c83, …
+    [x] + 1 more locations         137.45 KB
+  [x] ▾ user_logs  143.10 MB
+    [x] ~/Library/Logs/            143.03 MB  └ AdobeVulcan, ContentDelivery, …
+  [ ] ▸ ds_store  8.11 MB
 ```
 
-`d 1` drills into a module to deselect individual locations. `q` or Ctrl-C cancels
-without deleting anything.
+Modules expand to show their biggest locations, each individually selectable. Toggling a
+module carries its locations with it; unticking one location leaves the module partial
+(`[~]`). Small modules start collapsed — `→` opens them.
+
+`q`, Esc or Ctrl-C cancels without deleting anything. On a terminal that cannot support
+the selector (`TERM=dumb`, or `MACCLEANER_NO_TUI=1`) it falls back to a typed-number
+prompt with the same options.
 
 The gate appears **only when stdin and stdout are both terminals**, so a scheduled run
 never blocks waiting for input. Skip it with `--no-review` or `--yes`; force it in a

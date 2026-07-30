@@ -194,6 +194,17 @@ def review_selection(console, details, *, total: int) -> Selection:
     except Exception:  # noqa: BLE001 - never let cosmetics block the gate
         pass
 
+    # Preferred path: arrow keys, space to toggle, enter to run. Falls back to the typed
+    # prompt below when the terminal cannot support it, so nothing is ever unusable.
+    from mc.tui import run_selector, tui_available
+
+    if tui_available():
+        try:
+            return run_selector(console, details, total=total)
+        except Exception as exc:  # noqa: BLE001 - any TUI failure falls back, never blocks
+            console.print(f"[warning]Selector unavailable ({exc}); using the text prompt.[/warning]")
+            restore_terminal()
+
     totals = {m: sum(s for _p, s in e) for m, e in rows.items()}
 
     while True:
