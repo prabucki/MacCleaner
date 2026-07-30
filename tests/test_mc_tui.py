@@ -215,3 +215,58 @@ def test_bare_escape_is_not_mistaken_for_a_sequence():
     finally:
         os.close(read_fd)
         os.close(write_fd)
+
+
+# --------------------------------------------------------------------------------------
+# Label fitting
+# --------------------------------------------------------------------------------------
+
+
+def test_fit_keeps_the_tail_where_paths_differ():
+    """
+    Five Ferdium partitions differ only in a UUID near the end.
+
+    Middle-elision rendered them as identical visible text, which is what made the list
+    unreadable. Cutting from the front keeps what distinguishes them.
+    """
+
+    from mc.tui import _fit
+
+    a = "service-74b0d2c6-1139-47d1-b3d2-bd122d7aedf2/Cache/"
+    b = "service-868feca5-52a4-437f-9422-e3f74783fb38/Cache/"
+
+    assert _fit(a, 30) != _fit(b, 30), "trimmed labels must still differ"
+    assert _fit(a, 30).endswith("Cache/")
+    assert len(_fit(a, 30)) == 30
+
+
+def test_fit_leaves_short_text_alone():
+    from mc.tui import _fit
+
+    assert _fit("~/.npm/_npx/", 40) == "~/.npm/_npx/"
+
+
+def test_shared_root_is_hoisted_off_siblings():
+    from mc.tui import _relative_label, _shared_root
+
+    base = f"{HOME}/Library/Application Support/Ferdium/Partitions"
+    dirs = [f"{base}/service-{n}/Cache" for n in ("aaa", "bbb", "ccc")]
+
+    root = _shared_root(dirs)
+
+    assert root == base
+    assert _relative_label(dirs[0], root) == "service-aaa/Cache/"
+
+
+def test_shared_root_ignored_when_too_short_to_help():
+    from mc.tui import _shared_root
+
+    assert _shared_root(["/tmp/a", "/tmp/b"]) == ""
+
+
+def test_module_row_carries_the_root_its_children_are_relative_to():
+    nodes = build_tree(_details())
+    electron = next(n for n in nodes if n.label == "electron_apps")
+
+    assert electron.root.endswith("Ferdium/Partitions")
+    assert not electron.children[0].label.startswith("/"), "children should be relative"
