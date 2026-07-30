@@ -251,7 +251,9 @@ class Runtime:
         # A dry-run-only path is reported, never deleted — Path._execute returns before
         # reaching the runtime. Measuring is read-only, so the deletion policy does not
         # apply; that is what lets a module report the size of something it must not touch.
-        if not path_module.is_dry_run_only:
+        measure_only = path_module.is_dry_run_only
+
+        if not measure_only:
             decision = policy.check(
                 pattern, privileged=path_module.is_privileged, override=path_module.has_override
             )
@@ -261,6 +263,23 @@ class Runtime:
         total = 0
 
         for concrete in self._expand(pattern):
+            # Re-check each expanded path, exactly as execution does in _handle_local.
+            #
+            # Checking only the pattern is not enough: `~/Library/Application Support/*/*.log`
+            # passes, but expands to include Syncthing's log, which is hard-protected and
+            # would be refused at execution. Without this the dry run promises to delete
+            # things it will not touch, which is both a wrong total and a false alarm in
+            # the report.
+            if not measure_only:
+                verdict = policy.check(
+                    str(concrete), privileged=path_module.is_privileged, override=path_module.has_override
+                )
+                if not verdict.allowed:
+                    continue
+
+                if policy.resolve_escapes(str(concrete)) is not None:
+                    continue
+
             if seen is not None:
                 as_text = str(concrete)
 

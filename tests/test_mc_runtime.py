@@ -281,6 +281,46 @@ def test_estimate_excludes_paths_policy_would_refuse(runtime_factory, sandbox):
     assert runtime.estimate(_path_module(sandbox("Library/Caches/*"))) > 0
 
 
+def test_estimate_excludes_protected_paths_a_wildcard_expands_to(runtime_factory, sandbox, fake_home):
+    """
+    Regression: the dry run must not count files execution will refuse.
+
+    `~/Library/Application Support/*/*.log` passes a pattern-level policy check, but
+    expands to include Syncthing's log, which is hard-protected. Checking only the
+    pattern made the report promise to delete 6.63 MB of Syncthing data it would never
+    touch — a wrong total and a false alarm for anyone reading the report.
+    """
+
+    support = fake_home / "Library/Application Support"
+    (support / "NormalApp").mkdir(parents=True, exist_ok=True)
+    (support / "NormalApp" / "app.log").write_bytes(b"x" * 4096)
+    (support / "Syncthing").mkdir(parents=True, exist_ok=True)
+    (support / "Syncthing" / "syncthing.log").write_bytes(b"y" * 8192)
+
+    runtime, _report, _batch = runtime_factory(dry_run=True)
+
+    estimated = runtime.estimate(_path_module(sandbox("Library/Application Support/*/*.log")))
+
+    assert estimated == 4096, "Syncthing's protected log was counted in the estimate"
+
+
+def test_execution_agrees_with_the_estimate_on_wildcards(runtime_factory, sandbox, fake_home):
+    """The estimate and the real run must refuse exactly the same paths."""
+
+    support = fake_home / "Library/Application Support"
+    (support / "NormalApp").mkdir(parents=True, exist_ok=True)
+    (support / "NormalApp" / "app.log").write_bytes(b"x" * 4096)
+    (support / "Syncthing").mkdir(parents=True, exist_ok=True)
+    (support / "Syncthing" / "syncthing.log").write_bytes(b"y" * 8192)
+
+    runtime, _report, batch = runtime_factory()
+    runtime.delete_path(_path_module(sandbox("Library/Application Support/*/*.log")))
+    batch.close()
+
+    assert not (support / "NormalApp" / "app.log").exists(), "the unprotected log should go"
+    assert (support / "Syncthing" / "syncthing.log").exists(), "Syncthing is hard-protected"
+
+
 def test_estimate_deduplicates_overlapping_modules(runtime_factory, sandbox):
     """
     Overlapping rules are normal — the generic Electron sweep and the app-specific rules

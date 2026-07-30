@@ -38,9 +38,10 @@ def test_near_duplicates_roll_into_one_line():
     groups = _group_by_ancestor(entries)
 
     assert len(groups) == 1
-    directory, total, count = groups[0]
+    directory, total, count, members = groups[0]
     assert directory.endswith("Ferdium/Partitions")
     assert (total, count) == (52_000, 52)
+    assert len(members) == 52, "member paths are needed to name what is removed"
 
 
 def test_rollup_stops_at_a_meaningful_directory():
@@ -57,7 +58,7 @@ def test_rollup_stops_at_a_meaningful_directory():
         ("Documents/a/x", 10), ("Desktop/b/x", 10), ("Movies/c/x", 10),
     )
 
-    for directory, _total, _count in _group_by_ancestor(entries, max_groups=1):
+    for directory, _total, _count, _members in _group_by_ancestor(entries, max_groups=1):
         assert directory not in ("/", HOME, os.path.dirname(HOME)), f"rolled up to {directory}"
         assert directory.startswith(HOME)
 
@@ -75,7 +76,7 @@ def test_per_app_containers_keep_the_app_name():
         ("Library/Application Support/Notion/Cache/x", 100),
     )
 
-    directories = {d for d, _t, _c in _group_by_ancestor(entries, max_groups=1)}
+    directories = {d for d, _t, _c, _m in _group_by_ancestor(entries, max_groups=1)}
 
     assert any(d.endswith("/Ferdium") for d in directories)
     assert any(d.endswith("/Claude") for d in directories)
@@ -100,8 +101,8 @@ def test_totals_are_preserved_by_grouping():
     )
     expected = sum(size for _p, size in entries)
 
-    assert sum(total for _d, total, _c in _group_by_ancestor(entries)) == expected
-    assert sum(count for _d, _t, count in _group_by_ancestor(entries)) == len(entries)
+    assert sum(total for _d, total, _c, _m in _group_by_ancestor(entries)) == expected
+    assert sum(count for _d, _t, count, _m in _group_by_ancestor(entries)) == len(entries)
 
 
 def test_groups_are_ordered_largest_first():
@@ -110,6 +111,6 @@ def test_groups_are_ordered_largest_first():
         ("Library/Caches/Medium/x", 500),
     )
 
-    sizes = [total for _d, total, _c in _group_by_ancestor(entries)]
+    sizes = [total for _d, total, _c, _m in _group_by_ancestor(entries)]
 
     assert sizes == sorted(sizes, reverse=True)
