@@ -11,6 +11,10 @@ Firefox alone is 8.5 GB of Application Support plus 1 GB of Caches on this machi
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+from typing import List
+
 from mc.registry import Context, Risk, cleanup_module
 
 
@@ -137,3 +141,121 @@ def firefox(ctx: Context) -> None:
                 "~/Library/Application Support/TorBrowser-Data/Browser/Caches/*",
                 "~/Library/Application Support/TorBrowser-Data/Browser/*/cache2/*",
             )
+
+
+#: Where throwaway profiles are looked for. Deliberately a short list of conventional
+#: project roots rather than a walk of ``$HOME``: these directories are scratch space
+#: inside working trees, so a full-home scan would cost far more than it finds.
+TEST_PROFILE_ROOTS = (
+    "~/Drive/Projects",
+    "~/Projects",
+    "~/Developer",
+    "~/dev",
+    "~/src",
+    "~/code",
+)
+
+#: How far below each root to look. A harness keeps its scratch near its own scripts,
+#: so `<root>/<repo>/<area>/<harness>/.work/profile` is about as deep as it gets.
+TEST_PROFILE_MAX_DEPTH = 6
+
+#: A candidate must carry these to be treated as a Firefox profile. ``times.json`` is
+#: written at profile creation and ``prefs.js`` at first shutdown; requiring one of them
+#: alongside a cache directory is what separates a real profile from any directory that
+#: merely happens to be called ``profile``.
+PROFILE_MARKERS = ("times.json", "prefs.js")
+PROFILE_CACHE_DIRS = ("cache2", "startupCache", "storage", "extensions")
+
+
+def _looks_like_firefox_profile(path: Path) -> bool:
+    """
+    Is this really a Firefox profile directory?
+
+    The check exists because this module is the only one here that deletes inside the
+    user's own working trees rather than inside ``~/Library``. A name match alone is not
+    evidence — plenty of projects have a directory called ``profile`` that means
+    something entirely different — so require the structure Firefox actually writes.
+    """
+
+    try:
+        names = {entry.name for entry in path.iterdir()}
+    except OSError:
+        return False
+
+    return any(m in names for m in PROFILE_MARKERS) and any(d in names for d in PROFILE_CACHE_DIRS)
+
+
+@cleanup_module(
+    name="browser_test_profiles",
+    risk=Risk.STANDARD,
+    title="Throwaway browser profiles from test harnesses",
+    tags=("browser", "dev"),
+)
+def browser_test_profiles(ctx: Context) -> None:
+    """
+    Scratch Firefox profiles created by automation, in project trees rather than
+    ``~/Library``.
+
+    A harness that drives a real browser has to give it a real profile, and a real
+    profile fills up like one: extensions, ``cache2``, ``startupCache``, Widevine, the
+    Safebrowsing lists, IndexedDB. The copy found while writing this module was 312 MB
+    from a single ``userChrome.css`` screenshotting run — and because the harness
+    correctly gitignores its own scratch directory, nothing in the repository, the
+    working tree, or ``git status`` ever mentioned it again.
+
+    That is the whole reason for this module: the :mod:`firefox` module above cleans
+    profiles where Firefox itself puts them, and these are precisely the ones it cannot
+    see. They are also the ones nobody is watching, since they were never meant to
+    outlive the test run that made them.
+
+    The harness recreates the profile on its next run, so this is a no-loss cleanup in
+    the same sense as a cache — but only the profile is taken. Sibling scratch such as
+    captured screenshots or logs is left alone; it is small, and it is plausibly output
+    somebody still wants to look at.
+    """
+
+    found: List[Path] = []
+
+    for root_spec in TEST_PROFILE_ROOTS:
+        root = Path(root_spec).expanduser()
+        if not root.is_dir():
+            continue
+
+        root_depth = len(root.parts)
+
+        for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
+            here = Path(current)
+
+            # Depth-bound the walk, and never descend into the heavy trees that make an
+            # unbounded project-tree scan unusable.
+            if len(here.parts) - root_depth >= TEST_PROFILE_MAX_DEPTH:
+                dirs[:] = []
+                continue
+            dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "vendor", "Pods", "target")]
+
+            # ".work/profile" is the ffprobe convention; "*mozprofile*" is what
+            # geckodriver and the selenium bindings name theirs.
+            for d in list(dirs):
+                candidate = here / d
+                is_scratch_name = (d == "profile" and here.name == ".work") or "mozprofile" in d
+                if is_scratch_name and _looks_like_firefox_profile(candidate):
+                    found.append(candidate)
+                    dirs.remove(d)  # nothing further inside it is interesting
+
+    # geckodriver's own temporary profiles, which it leaves behind whenever a driver
+    # process is killed rather than closed.
+    tmp = Path(os.environ.get("TMPDIR", "/tmp"))
+    if tmp.is_dir():
+        try:
+            found.extend(
+                p for p in tmp.glob("rust_mozprofile*") if p.is_dir() and _looks_like_firefox_profile(p)
+            )
+        except OSError:
+            pass
+
+    if not found:
+        return ctx.skip("no throwaway browser profiles found")
+
+    with ctx.step(f"Removing {len(found)} throwaway browser profile(s)") as step:
+        for path in found:
+            step.path(str(path))

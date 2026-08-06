@@ -264,3 +264,90 @@ def test_replaced_script_capabilities_are_covered(capability, module_name):
     """Each capability of the scripts this replaces maps to a registered module."""
 
     assert module_name in REGISTRY, f"{capability} has no module ({module_name})"
+
+
+# ---------------------------------------------------------------------------
+# browser_test_profiles
+#
+# This is the only module that deletes inside the user's own working trees rather
+# than inside ~/Library, so what it declines to match matters as much as what it
+# matches. A directory called "profile" is not evidence of anything by itself.
+# ---------------------------------------------------------------------------
+
+
+def _make_ff_profile(root):
+    """A directory with the structure Firefox actually writes."""
+
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "times.json").write_text("{}")
+    (root / "cache2").mkdir(exist_ok=True)
+    return root
+
+
+def test_browser_test_profiles_finds_harness_scratch(tmp_path, monkeypatch):
+    """A .work/profile carrying Firefox markers is picked up."""
+
+    from mc.modules import browsers
+
+    target = _make_ff_profile(tmp_path / "repo" / "firefox" / "testing" / ".work" / "profile")
+    monkeypatch.setattr(browsers, "TEST_PROFILE_ROOTS", (str(tmp_path),))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "nonexistent-tmp"))
+
+    found = []
+    ctx = _RecordingContext(found)
+    browsers.browser_test_profiles(ctx)
+
+    assert str(target) in found
+
+
+def test_browser_test_profiles_ignores_lookalikes(tmp_path, monkeypatch):
+    """
+    A directory named "profile" with no Firefox structure is left alone.
+
+    This is the case that would lose someone's work: "profile" is an ordinary name for
+    an ordinary source directory.
+    """
+
+    from mc.modules import browsers
+
+    decoy = tmp_path / "repo" / "src" / ".work" / "profile"
+    decoy.mkdir(parents=True)
+    (decoy / "index.ts").write_text("export const profile = {}\n")
+
+    monkeypatch.setattr(browsers, "TEST_PROFILE_ROOTS", (str(tmp_path),))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "nonexistent-tmp"))
+
+    found = []
+    ctx = _RecordingContext(found)
+    browsers.browser_test_profiles(ctx)
+
+    assert found == []
+    assert (decoy / "index.ts").exists()
+
+
+class _RecordingContext:
+    """Minimal Context stand-in that records declared paths instead of deleting."""
+
+    def __init__(self, sink):
+        self._sink = sink
+        self.skipped = None
+
+    def skip(self, reason):
+        self.skipped = reason
+        return None
+
+    def step(self, _message):
+        sink = self._sink
+
+        class _Step:
+            def path(self, *patterns, **_kwargs):
+                sink.extend(patterns)
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+        return _Step()
