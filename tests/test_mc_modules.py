@@ -351,3 +351,29 @@ class _RecordingContext:
                 return False
 
         return _Step()
+
+
+def test_export_paths_writes_module_and_rule(tmp_path, monkeypatch):
+    """
+    --export-paths emits machine-readable TSV and deletes nothing.
+
+    MyMacSetup derives its Time Machine exclusions from this, on the reasoning that
+    anything safe to DELETE is certainly safe to omit from a backup. The contract
+    that matters to that consumer: absolute paths, never truncated for display, and
+    a dry run regardless of the other flags.
+    """
+
+    from mc.cli import main
+
+    out = tmp_path / "rules.tsv"
+    rc = main(["--export-paths", str(out), "--only", "user_caches", "--no-update", "--no-notify"])
+
+    assert rc == 0
+    assert out.exists()
+
+    lines = [line for line in out.read_text().splitlines() if line]
+    for line in lines:
+        module, _, rule = line.partition("\t")
+        assert module, f"no module attributed: {line!r}"
+        assert rule.startswith("/"), f"rule is not absolute: {rule!r}"
+        assert "…" not in rule, f"rule was truncated for display: {rule!r}"

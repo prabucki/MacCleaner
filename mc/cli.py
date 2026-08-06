@@ -149,6 +149,17 @@ def build_parser(defaults=None) -> argparse.ArgumentParser:
         help="like --breakdown but lists every path instead of collapsing",
     )
     out.add_argument("--json", dest="json_path", default="", help="write the run report to this path as well")
+    out.add_argument(
+        "--export-paths",
+        dest="export_paths",
+        default="",
+        help=(
+            "write the location RULES this run would clean to this path as TSV "
+            "(module<TAB>rule), then exit. Implies --dry-run and deletes nothing. "
+            "Intended for other tools that need to know what this machine considers "
+            "disposable — Time Machine exclusions, for one."
+        ),
+    )
     out.add_argument("--no-notify", action="store_true", help="suppress the macOS notification")
 
     manage = parser.add_argument_group("quarantine and introspection")
@@ -308,7 +319,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser(config)
     args = parser.parse_args(argv)
 
-    if args.breakdown or args.breakdown_all:
+    if args.breakdown or args.breakdown_all or args.export_paths:
         args.dry_run = True
 
     if not config.notify:
@@ -457,6 +468,7 @@ def _run(args, privileged: Privileged) -> int:
     want_detail = (
         args.breakdown
         or args.breakdown_all
+        or bool(args.export_paths)
         or args.review
         or (not args.dry_run and _interactive() and not args.no_review and not args.yes)
     )
@@ -464,6 +476,21 @@ def _run(args, privileged: Privileged) -> int:
 
     estimated = _estimate(collector, runtime, verbose=args.verbose, details=details)
     report.estimated_bytes = estimated
+
+    if args.export_paths:
+        # Rules, not the concrete paths they matched. A consumer wants the CONTAINER
+        # ("~/Library/Caches/Homebrew/*"), not the ten thousand files inside it —
+        # tagging each of those individually would be both enormous and pointless.
+        # Only rules that actually matched something on this machine are emitted.
+        from pathlib import Path as _Path
+
+        rules = sorted({(owner, rule) for (owner, rule) in (details or {})})
+        _Path(args.export_paths).write_text(
+            "".join(f"{owner}\t{rule}\n" for owner, rule in rules), encoding="utf-8"
+        )
+        console.print(f"wrote {len(rules)} rule(s) to {args.export_paths}")
+        set_runtime(None)
+        return 0
 
     if want_detail:
         from mc.breakdown import render_breakdown
