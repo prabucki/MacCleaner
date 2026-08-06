@@ -63,6 +63,15 @@ def chromium_browsers(ctx: Context) -> None:
 
     The ``*`` in the profile position covers Default, Profile 1, Profile 2 and so on, so
     this does not silently miss secondary profiles the way a Default-only rule would.
+
+    Two rules that used to live here are gone, because neither was cache:
+
+    * ``File System/*`` is the Filesystem API's site data store. It is written by pages
+      that asked for persistent storage, and nothing regenerates it.
+    * ``Extension State/*.log`` looked like a log and is not. That directory is a live
+      LevelDB, and the ``.log`` beside the ``.ldb`` files is its write-ahead log —
+      deleting it while leaving ``MANIFEST`` and the SSTs in place discards whatever has
+      not been compacted yet and can leave the database inconsistent on next open.
     """
 
     roots = (
@@ -89,14 +98,12 @@ def chromium_browsers(ctx: Context) -> None:
                 f"{root}/*/Service Worker/CacheStorage/*",
                 f"{root}/*/Service Worker/ScriptCache/*",
                 f"{root}/*/Application Cache/*",
-                f"{root}/*/File System/*",
                 f"{root}/*/Storage/ext/*/def/GPUCache/*",
                 f"{root}/ShaderCache/*",
                 f"{root}/GrShaderCache/*",
                 f"{root}/component_crx_cache/*",
                 f"{root}/extensions_crx_cache/*",
                 f"{root}/Crashpad/completed/*",
-                f"{root}/*/Extension State/*.log",
             )
 
     with ctx.step("Clearing Chrome-family HTTP caches") as step:

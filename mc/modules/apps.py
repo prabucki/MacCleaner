@@ -110,13 +110,20 @@ def telegram(ctx: Context) -> None:
 
 @cleanup_module(
     name="spotify",
-    risk=Risk.STANDARD,
+    risk=Risk.AGGRESSIVE,
     title="Spotify cache",
     requires=("~/Library/Application Support/Spotify",),
     tags=("apps",),
 )
 def spotify(ctx: Context) -> None:
-    """Offline audio cache. Re-downloads on demand; downloaded playlists are re-synced."""
+    """
+    Streamed audio cache, and the store behind "Download" for offline listening.
+
+    Aggressive rather than standard because Spotify keeps both in the same opaque
+    ``PersistentCache/Storage`` directory and nothing on disk distinguishes them. The
+    streaming cache costs a re-stream; the offline downloads cost a re-sync that needs
+    network you may specifically have downloaded them to avoid needing.
+    """
 
     with ctx.step("Clearing Spotify cache") as step:
         step.path(
@@ -136,8 +143,10 @@ def setapp_apps(ctx: Context) -> None:
     """
     Caches for Setapp and the apps installed through it.
 
-    CleanShot's media store is included: it keeps every screenshot and recording you have
-    ever taken until you clear it, which the original script did explicitly.
+    The original script cleared CleanShot's media store here. That store is not a cache:
+    it holds every screenshot and recording, and for anyone who has not configured an
+    export destination it is the only copy. It is soft-protected in the policy now, and
+    this module takes only CleanShot's actual cache.
     """
 
     with ctx.step("Clearing Setapp caches") as step:
@@ -147,13 +156,8 @@ def setapp_apps(ctx: Context) -> None:
             "~/Library/Application Support/iStat Menus*/Cache/*",
         )
 
-    with ctx.step("Clearing CleanShot media") as step:
-        # Only the app's own cache and the "recently captured" store; the export
-        # destination you configured is somewhere else and is not touched.
-        step.path(
-            "~/Library/Application Support/CleanShot/media/*",
-            "~/Library/Caches/pl.maketheweb.cleanshotx/*",
-        )
+    with ctx.step("Clearing CleanShot cache") as step:
+        step.path("~/Library/Caches/pl.maketheweb.cleanshotx/*")
 
 
 @cleanup_module(
@@ -184,7 +188,12 @@ def misc_apps(ctx: Context) -> None:
             "~/Library/Application Support/obsidian/GPUCache/*",
             "~/Library/Application Support/GitKraken/Cache/*",
             "~/Library/Application Support/GitKrakenCLI/Cache/*",
-            "~/Library/Caches/com.raycast.macos/*",
+            # Named subdirectories rather than a blanket glob: Raycast files clipboard
+            # history under its cache directory, and that is user data.
+            "~/Library/Caches/com.raycast.macos/WebKit/*",
+            "~/Library/Caches/com.raycast.macos/urlcache/*",
+            "~/Library/Caches/com.raycast.macos/fsCachedData/*",
+            "~/Library/Caches/com.raycast.macos/Cache.db*",
             "~/Library/Caches/com.brave.Browser.helper/*",
             "~/Library/Caches/com.hnc.Discord.ShipIt/*",
             "~/Library/Caches/com.microsoft.VSCode.ShipIt/*",

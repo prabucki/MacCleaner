@@ -13,6 +13,18 @@ from __future__ import annotations
 
 from mc.registry import Context, Risk, cleanup_module
 
+#: Processes that keep live scratch in ``$TMPDIR``. While any of these is running, the
+#: per-boot "T" directory is left alone — see :func:`system_caches`.
+TEMP_DIR_WRITERS = (
+    "Xcode",
+    "xcodebuild",
+    "Simulator",
+    "gradle",
+    "java",
+    "Android Studio",
+    "Docker Desktop",
+)
+
 
 @cleanup_module(
     name="user_caches",
@@ -111,10 +123,21 @@ def system_caches(ctx: Context) -> None:
 
     with ctx.step("Clearing per-boot temporary caches") as step:
         # The original script hardcoded one machine's UUID here. This finds it anywhere.
-        step.root_path(
-            "/private/var/folders/*/*/C/*",
-            "/private/var/folders/*/*/T/*",
-        )
+        step.root_path("/private/var/folders/*/*/C/*")
+
+        # The "T" directory is $TMPDIR, and unlike everything else in this module it holds
+        # scratch belonging to processes that are alive right now — a build writing an
+        # .xcresult bundle, an archive being unpacked. Deleting under a running build does
+        # not merely lose a cache, it fails the build. Skipped while one is running rather
+        # than dropped entirely, because it is usually the largest item here.
+        busy = [name for name in TEMP_DIR_WRITERS if ctx.is_running(name)]
+
+        if busy:
+            ctx.report.module("system_caches").reason = (
+                f"left $TMPDIR alone: {', '.join(busy)} running"
+            )
+        else:
+            step.root_path("/private/var/folders/*/*/T/*")
 
     with ctx.step("Clearing CoreDuet and boot caches") as step:
         step.root_path(

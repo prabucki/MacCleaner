@@ -376,6 +376,18 @@ _SOFT_PROTECTED = (
     # cleanable. (Vaults themselves live in user folders and are protected there.)
     "~/Library/Application Support/obsidian/obsidian.json",
     "~/Library/Application Support/obsidian/Preferences",
+    # User data filed under a cache-shaped path. Both of these are the *only* copy of
+    # something the user would notice losing, and both sit where a generic sweep finds
+    # them: Raycast keeps clipboard history inside ~/Library/Caches, which `user_caches`
+    # globs wholesale, and CleanShot's media store holds every capture not exported
+    # elsewhere. Protection is on the directory the glob actually yields — matching is
+    # exact-path, so protecting only the inner "Clipboard" would not stop a rule that
+    # deletes its parent.
+    "~/Library/Caches/com.raycast.macos",
+    "~/Library/Caches/com.raycast.macos/Clipboard",
+    "~/Library/Caches/com.raycast.macos/Clipboard/**",
+    "~/Library/Application Support/CleanShot/media",
+    "~/Library/Application Support/CleanShot/media/**",
     "~/.zshrc",
     "~/.zshenv",
     "~/.bashrc",
