@@ -169,6 +169,11 @@ def build_parser(defaults=None) -> argparse.ArgumentParser:
     manage.add_argument(
         "--purge-quarantine", action="store_true", help="purge expired quarantine batches, then exit"
     )
+    manage.add_argument(
+        "--empty-quarantine",
+        action="store_true",
+        help="delete ALL quarantine batches now, expired or not (asks to confirm; no undo), then exit",
+    )
     manage.add_argument("--explain-policy", action="store_true", help="print the path policy, then exit")
     manage.add_argument("--doctor", action="store_true", help="check the install and exit")
 
@@ -283,6 +288,30 @@ def _cmd_restore(stamp: str, privileged: Privileged) -> int:
     return 0 if not errors else 1
 
 
+def _cmd_empty_quarantine(args, privileged: Privileged) -> int:
+    from mc.review import is_interactive, _ask
+
+    batches = list(quarantine.list_batches())
+    if not batches:
+        console.print("Quarantine is already empty.")
+        return 0
+
+    total = sum(size for _, _, size, _ in batches)
+    console.print(
+        f"[danger]This deletes {len(batches)} batch(es) holding {human(total)} right now, "
+        f"including anything not yet expired. There is no undo.[/danger]"
+    )
+
+    if not args.yes and is_interactive():
+        if _ask(console, "Type 'yes' to permanently empty quarantine: ") != "yes":
+            console.print("Aborted.")
+            return 1
+
+    reclaimed = quarantine.empty_all(privileged_client=privileged)
+    console.print(f"Emptied quarantine, reclaiming [success]{human(reclaimed)}[/success].")
+    return 0
+
+
 def _cmd_doctor(privileged: Privileged) -> int:
     from mc.preflight import has_full_disk_access, on_ac_power
     from mc.privileged import ASKPASS_PATH, HELPER_PATH
@@ -361,6 +390,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         reclaimed = quarantine.purge_expired(retention_days=args.retention_days, privileged_client=privileged)
         console.print(f"Purged [success]{human(reclaimed)}[/success] of expired quarantine.")
         return 0
+    if args.empty_quarantine:
+        return _cmd_empty_quarantine(args, privileged)
 
     return _run(args, privileged)
 

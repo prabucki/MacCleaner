@@ -27,7 +27,7 @@ from typing import Iterator, List, Optional
 from mc import policy
 from mc.util import MC_HOME, human, iso_stamp, path_size, same_volume
 
-__all__ = ["QuarantineBatch", "Entry", "purge_expired", "list_batches", "restore"]
+__all__ = ["QuarantineBatch", "Entry", "purge_expired", "empty_all", "list_batches", "restore"]
 
 QUARANTINE_ROOT = MC_HOME / "quarantine"
 
@@ -267,6 +267,38 @@ def purge_expired(
             shutil.rmtree(batch_dir)
         except PermissionError:
             # Root-owned payload (staged from /Library, /var/log, ...).
+            if privileged_client is None or not privileged_client.available:
+                continue
+            privileged_client.purge_quarantine(batch_dir)
+
+        if not batch_dir.exists():
+            reclaimed += size
+
+    return reclaimed
+
+
+def empty_all(*, root: Path = QUARANTINE_ROOT, privileged_client=None) -> int:
+    """
+    Delete every quarantine batch right now, expired or not.
+
+    Unlike :func:`purge_expired`, this ignores the retention window — the caller (the
+    ``--empty-quarantine`` console command) is expected to have already warned the user
+    that this forfeits the undo window for anything staged so far.
+
+    :return: Bytes reclaimed.
+    """
+
+    if not root.is_dir():
+        return 0
+
+    reclaimed = 0
+
+    for batch_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        size = path_size(batch_dir)
+
+        try:
+            shutil.rmtree(batch_dir)
+        except PermissionError:
             if privileged_client is None or not privileged_client.available:
                 continue
             privileged_client.purge_quarantine(batch_dir)
