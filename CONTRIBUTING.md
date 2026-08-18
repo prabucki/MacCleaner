@@ -82,3 +82,9 @@ Once you submit your PR, someone of collaborators will come and see your PR.
 Congratulations :tada::sparkles:
 
 Once your PR is merged, your contributions will be publicly visible on the [mac-cleanup-py](https://github.com/mac-cleanup/mac-cleanup-py).
+
+## No GitHub Actions
+
+The workflows (`tox.yml` on macOS runners, `codeql.yml`, `greetings.yml`) were
+removed on 2026-08-18 to stop consuming the account's Actions minutes. Run the
+checks locally instead: `make test` / `tox`, and pre-commit for lint.
