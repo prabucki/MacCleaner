@@ -149,20 +149,32 @@ def has_full_disk_access() -> bool:
     """
     Probe whether this process has Full Disk Access.
 
-    Reading the user's TCC database is the conventional test: it is protected by TCC
-    itself, so a successful read means the grant is in place. Without it, the
-    container/Mail/Safari modules silently see empty directories, which is far worse than
-    being told up front.
+    Reading a TCC database is the conventional test: it is protected by TCC itself, so a
+    successful read means the grant is in place. Without it, the container/Mail/Safari
+    modules silently see empty directories, which is far worse than being told up front.
+
+    The per-user database is not guaranteed to exist — on Darwin 27 it is absent, and
+    probing only that path reported "no access" forever, however the grant was set. So
+    the system database is tried as well, and a missing file is skipped rather than read
+    as a denial. Only a permission error counts as evidence against the grant.
     """
 
-    probe = Path.home() / "Library/Application Support/com.apple.TCC/TCC.db"
+    probes = (
+        Path.home() / "Library/Application Support/com.apple.TCC/TCC.db",
+        Path("/Library/Application Support/com.apple.TCC/TCC.db"),
+    )
 
-    try:
-        with probe.open("rb") as handle:
-            handle.read(16)
-        return True
-    except (PermissionError, OSError):
-        return False
+    for probe in probes:
+        try:
+            with probe.open("rb") as handle:
+                handle.read(16)
+            return True
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+
+    return False
 
 
 def running_under_launchd() -> bool:
