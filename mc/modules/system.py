@@ -114,7 +114,7 @@ def launch_services(ctx: Context) -> None:
 
 @cleanup_module(
     name="sleep_image",
-    risk=Risk.AGGRESSIVE,
+    risk=Risk.NUCLEAR,
     title="Sleep image",
     tags=("system", "privileged"),
 )
@@ -124,6 +124,11 @@ def sleep_image(ctx: Context) -> None:
 
     Equal in size to installed RAM. Regenerated on the next hibernate, so this is a
     one-time reclaim that comes back — worth doing on a machine that never hibernates.
+
+    Nuclear tier since 2026-09-24, i.e. off by default. This Mac runs hibernatemode 3,
+    which rewrites the image at every sleep, so the weekly run freed nothing: each pass
+    staged another 2 GB copy to quarantine, and four same-day runs held 8 GiB of stale
+    RAM images for the 7-day retention. Run it with --only if hibernation is ever off.
     """
 
     if not ctx.privileged.available:
