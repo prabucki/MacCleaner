@@ -376,16 +376,6 @@ def verb_purge(_argv):
     _emit({"verb": "purge", "code": code, "output": output})
 
 
-def verb_periodic(argv):
-    """Run the system's own maintenance scripts (the OnyX 'Automation' equivalent)."""
-
-    allowed = {"daily", "weekly", "monthly"}
-    requested = [a for a in argv if a in allowed] or ["daily", "weekly", "monthly"]
-
-    code, output = _run(["/usr/sbin/periodic"] + requested, timeout=900)
-    _emit({"verb": "periodic", "ran": requested, "code": code, "output": output})
-
-
 def verb_flush_dns(_argv):
     """Flush the DNS cache and restart the multicast responder."""
 
@@ -421,14 +411,6 @@ def verb_lsregister_rebuild(_argv):
         [lsregister, "-kill", "-r", "-seed", "-domain", "local", "-domain", "system", "-domain", "user"], timeout=600
     )
     _emit({"verb": "lsregister-rebuild", "code": code, "output": output})
-
-
-def verb_kextcache_rebuild(_argv):
-    """Rebuild the kernel extension cache."""
-
-    _run(["/usr/bin/touch", "/System/Library/Extensions"], timeout=60)
-    code, output = _run(["/usr/sbin/kextcache", "-u", "/"], timeout=900)
-    _emit({"verb": "kextcache-rebuild", "code": code, "output": output})
 
 
 def verb_font_cache_reset(_argv):
@@ -510,11 +492,9 @@ VERBS = {
     "unstage": verb_unstage,
     "purge-quarantine": verb_purge_quarantine,
     "purge": verb_purge,
-    "periodic": verb_periodic,
     "flush-dns": verb_flush_dns,
     "log-erase": verb_log_erase,
     "lsregister-rebuild": verb_lsregister_rebuild,
-    "kextcache-rebuild": verb_kextcache_rebuild,
     "font-cache-reset": verb_font_cache_reset,
     "softwareupdate": verb_softwareupdate,
     "snapshot-create": verb_snapshot_create,

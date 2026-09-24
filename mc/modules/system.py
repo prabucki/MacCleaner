@@ -1,8 +1,13 @@
 """
 Trash, snapshots and system maintenance.
 
-The maintenance half is the OnyX equivalent: run the system's own periodic scripts,
-rebuild the databases that go stale, flush caches that need an explicit poke.
+The maintenance half is the OnyX equivalent: rebuild the databases that go stale,
+flush caches that need an explicit poke.
+
+Retired on macOS 27 (Golden Gate), 2026-09-24: periodic_scripts (/usr/sbin/periodic
+and /etc/periodic are gone, and the module reported ok while running nothing) and
+kext_cache (the system volume is sealed read-only, so `touch /System/Library/Extensions`
+fails and kextcache -u / has nothing to rebuild; kmutil owns kext collections).
 """
 
 from __future__ import annotations
@@ -87,28 +92,6 @@ def dns_cache(ctx: Context) -> None:
 
 
 @cleanup_module(
-    name="periodic_scripts",
-    risk=Risk.STANDARD,
-    title="System maintenance scripts",
-    tags=("system", "maintenance", "privileged"),
-)
-def periodic_scripts(ctx: Context) -> None:
-    """
-    Run macOS's own daily/weekly/monthly maintenance.
-
-    These rotate logs and rebuild the locate/whatis databases. They are scheduled to run
-    overnight, so a Mac that sleeps at night may never run them at all — which is exactly
-    the gap OnyX's 'Automation' tab exists to fill.
-    """
-
-    if not ctx.privileged.available:
-        return ctx.skip(f"needs root: {ctx.privileged.unavailable_reason}")
-
-    with ctx.step("Running periodic maintenance scripts") as step:
-        step.root("periodic", "daily", "weekly", "monthly")
-
-
-@cleanup_module(
     name="launch_services",
     risk=Risk.AGGRESSIVE,
     title="Launch Services database",
@@ -127,29 +110,6 @@ def launch_services(ctx: Context) -> None:
 
     with ctx.step("Rebuilding Launch Services database") as step:
         step.root("rebuild_launch_services")
-
-
-@cleanup_module(
-    name="kext_cache",
-    risk=Risk.NUCLEAR,
-    title="Kernel extension cache",
-    tags=("system", "maintenance", "privileged"),
-)
-def kext_cache(ctx: Context) -> None:
-    """
-    Rebuild the kernel extension cache.
-
-    Nuclear tier, and the honest reason is that this touches the boot path. On a modern
-    Apple Silicon Mac with no third-party kexts it is a no-op at best; if it goes wrong
-    it goes wrong at boot. The original script ran it unconditionally. Enable it only if
-    you actually have third-party kernel extensions misbehaving.
-    """
-
-    if not ctx.privileged.available:
-        return ctx.skip(f"needs root: {ctx.privileged.unavailable_reason}")
-
-    with ctx.step("Rebuilding kernel extension cache") as step:
-        step.root("rebuild_kextcache")
 
 
 @cleanup_module(

@@ -222,7 +222,7 @@ class Step:
         """
         Invoke a root-helper maintenance verb.
 
-        :param verb: Method name on :class:`mc.privileged.Privileged`, e.g. ``periodic``.
+        :param verb: Method name on :class:`mc.privileged.Privileged`, e.g. ``flush_dns``.
         """
 
         privileged = self._context.privileged

@@ -176,9 +176,9 @@ def test_nuclear_modules_are_excluded_from_the_default_profile():
 def test_only_bypasses_the_tier_filter():
     """--only should run a single nuclear module without changing profile."""
 
-    selected = select(profile=Risk.SAFE, only=["kext_cache"])
+    selected = select(profile=Risk.SAFE, only=["spotlight_index"])
 
-    assert [m.name for m in selected] == ["kext_cache"]
+    assert [m.name for m in selected] == ["spotlight_index"]
 
 
 def test_skip_accepts_names_and_tags():
@@ -237,7 +237,7 @@ def test_upstream_modules_are_triaged():
         ("font caches", "font_cache"),
         ("launch services rebuild", "launch_services"),
         ("dns flush", "dns_cache"),
-        ("periodic scripts", "periodic_scripts"),
+        # "periodic scripts" retired with macOS 27: /usr/sbin/periodic no longer exists.
         ("inactive memory purge", "memory_purge"),
         ("xcode derived data", "xcode"),
         ("xcode simulators", "xcode_simulators"),

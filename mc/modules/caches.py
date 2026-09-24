@@ -92,24 +92,6 @@ def container_caches(ctx: Context) -> None:
 
 
 @cleanup_module(
-    name="saved_state",
-    risk=Risk.AGGRESSIVE,
-    title="Saved application state",
-    tags=("cache",),
-)
-def saved_state(ctx: Context) -> None:
-    """
-    Window/document restore state.
-
-    Safe to remove — apps reopen with default windows instead of restoring the last
-    session. Aggressive tier because it is a visible behaviour change, not a risk.
-    """
-
-    with ctx.step("Clearing saved application state") as step:
-        step.path("~/Library/Saved Application State/*.savedState")
-
-
-@cleanup_module(
     name="system_caches",
     risk=Risk.AGGRESSIVE,
     title="System caches",

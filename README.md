@@ -209,7 +209,7 @@ run, which has no command line:
 
 ```toml
 profile = "aggressive"
-skip = ["kext_cache"]
+skip = ["spotlight_index"]
 retention_days = 14
 min_free_gb = 10
 ```

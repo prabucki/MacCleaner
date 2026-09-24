@@ -60,10 +60,10 @@ drift from the code.
 | Original | Now |
 |---|---|
 | `sudo purge` | `memory_purge` |
-| `sudo periodic daily weekly monthly` | `periodic_scripts` |
+| `sudo periodic daily weekly monthly` | `periodic_scripts` — retired 2026-09-24: macOS 27 removed `/usr/sbin/periodic`. |
 | `sudo dscacheutil -flushcache && killall -HUP mDNSResponder` | `dns_cache` |
 | `lsregister -kill -r -seed -domain local -domain system -domain user` | `launch_services` |
-| `sudo touch /System/Library/Extensions && sudo kextcache -u /` | `kext_cache`, moved to the **nuclear** tier. It touches the boot path, and on an Apple Silicon Mac with no third-party kexts it is a no-op at best. The original ran it on every invocation. |
+| `sudo touch /System/Library/Extensions && sudo kextcache -u /` | `kext_cache`, moved to the **nuclear** tier. It touches the boot path, and on an Apple Silicon Mac with no third-party kexts it is a no-op at best. The original ran it on every invocation. Retired 2026-09-24: on macOS 27 the sealed system volume rejects the `touch`, and kmutil owns kext collections. |
 | `sudo update_dyld_shared_cache` (commented out) | Left out — deprecated, as the comment said. |
 | `sudo /usr/libexec/xpchelper --rebuild-cache` (commented out) | Left out. |
 

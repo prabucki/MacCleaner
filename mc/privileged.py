@@ -57,7 +57,7 @@ class Privileged:
 
     #: Verbs that can take a long time and need a longer client-side timeout than the
     #: helper's own internal one.
-    _SLOW_VERBS = {"softwareupdate": 3700, "kextcache-rebuild": 960, "periodic": 960, "log-erase": 660}
+    _SLOW_VERBS = {"softwareupdate": 3700, "log-erase": 660}
 
     def __init__(self, *, enabled: bool = True):
         self.enabled = enabled
@@ -208,9 +208,6 @@ class Privileged:
     def purge_memory(self) -> PrivilegedResult:
         return self._call("purge")
 
-    def periodic(self, *which: str) -> PrivilegedResult:
-        return self._call("periodic", *(which or ("daily", "weekly", "monthly")))
-
     def flush_dns(self) -> PrivilegedResult:
         return self._call("flush-dns")
 
@@ -219,9 +216,6 @@ class Privileged:
 
     def rebuild_launch_services(self) -> PrivilegedResult:
         return self._call("lsregister-rebuild")
-
-    def rebuild_kextcache(self) -> PrivilegedResult:
-        return self._call("kextcache-rebuild")
 
     def reset_font_cache(self) -> PrivilegedResult:
         return self._call("font-cache-reset")

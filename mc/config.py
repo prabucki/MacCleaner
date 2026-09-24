@@ -11,7 +11,7 @@ Everything is optional; the file need not exist. Command-line flags always win.
 Example::
 
     profile = "aggressive"
-    skip = ["kext_cache", "spotlight_index"]
+    skip = ["spotlight_index"]
     retention_days = 14
     os_updates = false
     min_free_gb = 10
