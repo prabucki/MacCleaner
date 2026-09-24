@@ -211,7 +211,11 @@ class RunReport:
         if self.quarantine_purged:
             parts.append(f"purged {human(self.quarantine_purged)} of expired quarantine")
 
-        parts.append(f"free space {'+' if self.free_space_delta >= 0 else ''}{human(abs(self.free_space_delta))}")
+        # Signed both ways. The minus used to be dropped, so a run that ended with 2 GB
+        # LESS free (quarantine moves free nothing; updates download) printed "free space
+        # 2.21 GB" — which reads as an absolute figure and looked like a near-full disk.
+        sign = "+" if self.free_space_delta >= 0 else "-"
+        parts.append(f"free space {sign}{human(abs(self.free_space_delta))} ({human(self.free_after)} free)")
 
         return "; ".join(parts) + "."
 

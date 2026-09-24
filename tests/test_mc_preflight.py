@@ -47,3 +47,4 @@ def test_full_disk_access_probe(monkeypatch, user, system, expected) -> None:
     monkeypatch.setattr(Path, "open", _fake_open({USER: user, SYSTEM: system}))
 
     assert preflight.has_full_disk_access() is expected
+
