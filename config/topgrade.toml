@@ -79,11 +79,26 @@ disable = [
     # and cargo-update is absent, so the step only ever printed an install hint.
     "pnpm",
     "cargo",
+
+    # Ruby. `gem` runs `gem update --user-install`, which ignores GEM_HOME and installs
+    # into Gem.user_dir (~/.gem/ruby/<ver>) — a second gem home next to ~/.gem that the
+    # shell never puts on PATH. `ruby_gems` runs `sudo gem update --system` against
+    # Homebrew's ruby and left 36 root-owned files in its Cellar. Homebrew already ships
+    # rubygems with the ruby formula; the "Gems" custom command below replaces both.
+    "gem",
+    "ruby_gems",
 ]
 
 # "nix_helper" is deliberately NOT listed above. topgrade 17 deprecated that step, and
 # naming it — even to disable it — is what prints "`NixHelper` step is deprecated" at the
 # top of every run. Verified with `topgrade --dry-run --only mise --disable nix_helper`.
+
+[commands]
+# Updates only the gems installed in GEM_HOME, by name. A bare `gem update` also
+# "updates" Ruby's default gems, copying them into GEM_HOME — which is how rdoc 8 landed
+# next to the bundled rdoc 7 and every gem command printed "already initialized
+# constant" warnings from both rubygems plugins loading.
+"Gems" = 'gem update --no-document $(ls "${GEM_HOME:-$HOME/.gem}/specifications" | sed -E "s/-[0-9][^-]*(-.+)?\.gemspec$//" | sort -u)'
 
 [brew]
 # --greedy: also upgrade casks that manage their own auto-updates. This is what the

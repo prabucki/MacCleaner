@@ -24,6 +24,10 @@ REPO_DIR="$(cd "$(dirname "$target")/.." && pwd)"
 
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
+# Same gem home the interactive shell uses (home/.zshrc in MyMacSetup). launchd starts
+# without it, and gem then falls back to Homebrew's read-only default dir.
+export GEM_HOME="${GEM_HOME:-$HOME/.gem}"
+
 PYTHON="$REPO_DIR/.venv/bin/python"
 if [ ! -x "$PYTHON" ]; then
     printf 'MacCleaner: no virtualenv at %s - run ./install.sh first\n' "$REPO_DIR/.venv" >&2
