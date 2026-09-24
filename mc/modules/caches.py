@@ -11,7 +11,17 @@ the user's UUID and changes; the glob here finds it wherever it is.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mc.registry import Context, Risk, cleanup_module
+
+# Darwin 27 moved atsutil to /usr/bin and dropped the framework copy; older releases
+# have only the framework one. Order matters: the first that exists is used.
+ATSUTIL_PATHS = (
+    "/usr/bin/atsutil",
+    "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/"
+    "ATS.framework/Versions/A/Support/atsutil",
+)
 
 #: Processes that keep live scratch in ``$TMPDIR``. While any of these is running, the
 #: per-boot "T" directory is left alone — see :func:`system_caches`.
@@ -160,10 +170,10 @@ def font_cache(ctx: Context) -> None:
     first launch afterwards.
     """
 
-    atsutil = (
-        "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/"
-        "ATS.framework/Versions/A/Support/atsutil"
-    )
+    atsutil = next((path for path in ATSUTIL_PATHS if Path(path).exists()), None)
+    if atsutil is None:
+        ctx.report.module("font_cache").reason = "atsutil not found on this macOS"
+        return
 
     with ctx.step("Resetting font caches") as step:
         step.command([atsutil, "databases", "-removeUser"], timeout=120)
@@ -171,8 +181,11 @@ def font_cache(ctx: Context) -> None:
         if ctx.privileged.available:
             step.root("reset_font_cache")
 
-        step.command([atsutil, "server", "-shutdown"], timeout=60)
-        step.command([atsutil, "server", "-ping"], timeout=60)
+        # The `server` verb went with the move to /usr/bin: that atsutil knows only
+        # `fonts` and `databases`, and fontd picks the reset up on its own.
+        if atsutil == ATSUTIL_PATHS[1]:
+            step.command([atsutil, "server", "-shutdown"], timeout=60)
+            step.command([atsutil, "server", "-ping"], timeout=60)
 
 
 @cleanup_module(

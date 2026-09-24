@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import plistlib
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Set
+from xml.parsers.expat import ExpatError
 
 from mc.registry import Context, Risk, cleanup_module
 
@@ -205,6 +207,29 @@ def app_leftovers(ctx: Context) -> None:
     )
 
 
+def _load_launchd_plist(path: Path) -> dict:
+    """
+    Parse a launchd plist the way launchd does, not the way strict XML does.
+
+    plistlib rejects documents that launchd and plutil accept — a ``--`` inside an XML
+    comment is the common one — and it raises ExpatError, which is not a ValueError, so
+    one such file used to abort the whole scan. Fall back to plutil's own parser.
+    """
+
+    try:
+        with path.open("rb") as handle:
+            return plistlib.load(handle)
+    except ExpatError:
+        converted = subprocess.run(
+            ["/usr/bin/plutil", "-convert", "xml1", "-o", "-", str(path)],
+            capture_output=True,
+            timeout=30,
+        )
+        if converted.returncode != 0:
+            raise
+        return plistlib.loads(converted.stdout)
+
+
 @cleanup_module(
     name="broken_login_items",
     risk=Risk.SAFE,
@@ -232,9 +257,12 @@ def broken_login_items(ctx: Context) -> None:
 
             for plist_path in root.glob("*.plist"):
                 try:
-                    with plist_path.open("rb") as handle:
-                        plist = plistlib.load(handle)
-                except (OSError, plistlib.InvalidFileException, ValueError):
+                    plist = _load_launchd_plist(plist_path)
+                except PermissionError:
+                    # Root-only daemons (NordVPN's helper is 0600). Unreadable to us is
+                    # not broken to launchd, so this is not something to report.
+                    continue
+                except (OSError, plistlib.InvalidFileException, ValueError, ExpatError):
                     broken.append(f"{plist_path} (unreadable)")
                     continue
 

@@ -87,6 +87,10 @@ disable = [
     # rubygems with the ruby formula; the "Gems" custom command below replaces both.
     "gem",
     "ruby_gems",
+
+    # Installed as the Homebrew cask cursor-cli; its self-updater would rewrite the
+    # Caskroom payload behind brew's back. The brew steps above upgrade it.
+    "cursor_agent",
 ]
 
 # "nix_helper" is deliberately NOT listed above. topgrade 17 deprecated that step, and

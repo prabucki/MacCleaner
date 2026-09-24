@@ -428,8 +428,16 @@ def verb_kextcache_rebuild(_argv):
 def verb_font_cache_reset(_argv):
     """Drop the system font caches."""
 
-    code, output = _run(["/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/"
-                         "ATS.framework/Versions/A/Support/atsutil", "databases", "-remove"], timeout=120)
+    # /usr/bin on Darwin 27+, the framework copy before it.
+    candidates = ("/usr/bin/atsutil",
+                  "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/"
+                  "ATS.framework/Versions/A/Support/atsutil")
+    atsutil = next((path for path in candidates if os.path.exists(path)), None)
+    if atsutil is None:
+        _emit({"verb": "font-cache-reset", "code": 127, "output": "atsutil not found"})
+        return
+
+    code, output = _run([atsutil, "databases", "-remove"], timeout=120)
     _emit({"verb": "font-cache-reset", "code": code, "output": output})
 
 
