@@ -19,6 +19,7 @@ Run order is deliberate:
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -685,10 +686,35 @@ def _finish(report: RunReport, args, *, batch: Optional[QuarantineBatch] = None)
             json.dumps(report.to_dict(), indent=2, default=str), encoding="utf-8"
         )
 
-    print_panel(text=report.summary_text(), title="[info]MacCleaner")
+    print_panel(text=report.summary_text() + _quarantine_footer(args), title="[info]MacCleaner")
     console.print(f"[dim]Report: {written}[/dim]")
 
     report.notify()
+
+
+def _quarantine_footer(args) -> str:
+    """
+    One more panel line: everything quarantine holds, when it frees itself, and how to
+    free it now. Empty when quarantine is.
+    """
+
+    held = quarantine.totals()
+    if not held.batches:
+        return ""
+
+    # Expiry is not deletion: purge_expired only runs at the start of an mc run, so an
+    # expired batch lingers until the next one.
+    expires_in = args.retention_days - held.oldest_age_days
+    when = (
+        "has expired and goes on the next run"
+        if expires_in <= 0
+        else f"expires in {math.ceil(expires_in)} day(s)"
+    )
+    return (
+        f"\nQuarantine holds {human(held.total_bytes)} in {held.files:,} file(s) across "
+        f"{held.batches} batch(es); the oldest {when}."
+        f"\nFree it now, permanently: [info]mc --empty-quarantine[/info]"
+    )
 
 
 def entrypoint() -> None:  # pragma: no cover - console_scripts target

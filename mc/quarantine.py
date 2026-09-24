@@ -27,7 +27,7 @@ from typing import Iterator, List, Optional
 from mc import policy
 from mc.util import MC_HOME, human, iso_stamp, path_size, same_volume
 
-__all__ = ["QuarantineBatch", "Entry", "purge_expired", "empty_all", "list_batches", "restore"]
+__all__ = ["QuarantineBatch", "QuarantineTotals", "Entry", "purge_expired", "empty_all", "list_batches", "restore", "totals"]
 
 QUARANTINE_ROOT = MC_HOME / "quarantine"
 
@@ -209,6 +209,54 @@ def _read_manifest(batch_dir: Path) -> List[Entry]:
                 continue  # a torn final line from a hard kill; the rest is still good
 
     return entries
+
+
+@dataclass(frozen=True)
+class QuarantineTotals:
+    """What quarantine holds right now, across every batch."""
+
+    batches: int
+    total_bytes: int
+    files: int
+    oldest_age_days: float
+
+
+def totals(*, root: Path = QUARANTINE_ROOT) -> QuarantineTotals:
+    """
+    Measure every batch's payload on disk in one walk: bytes, files and oldest age.
+
+    Shown at the end of each run, because quarantine is where "reclaimed" space actually
+    sits for a week — four same-day runs held 21 GB there on 2026-09-24 while the summary
+    only mentioned the current run's batch.
+    """
+
+    batches = 0
+    total_bytes = 0
+    files = 0
+    oldest: Optional[datetime] = None
+
+    if not root.is_dir():
+        return QuarantineTotals(0, 0, 0, 0.0)
+
+    for batch_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        try:
+            created = datetime.strptime(batch_dir.name, _STAMP_FORMAT)
+        except ValueError:
+            continue
+
+        batches += 1
+        oldest = created if oldest is None else min(oldest, created)
+
+        for walk_root, dirs, names in os.walk(batch_dir / _PAYLOAD_DIR, followlinks=False):
+            for name in names + dirs:
+                try:
+                    total_bytes += os.lstat(os.path.join(walk_root, name)).st_size
+                except OSError:
+                    continue
+            files += len(names)
+
+    age = (datetime.now() - oldest).total_seconds() / 86400 if oldest else 0.0
+    return QuarantineTotals(batches, total_bytes, files, age)
 
 
 def list_batches(*, root: Path = QUARANTINE_ROOT) -> Iterator[tuple]:
