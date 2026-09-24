@@ -350,6 +350,15 @@ _HARD_PROTECTED = (
     "/nix/**",
 )
 
+#: The only holes in the ``/System/**`` hard protection. Each one is a re-downloadable
+#: asset that macOS keeps on the writable data volume (AssetsV2 is firmlinked there, so
+#: the sealed system volume is untouched). The privileged allowlist still applies on top.
+_SYSTEM_CARVE_OUTS = (
+    # Apple Intelligence models, ~13 GB. Only removed when SIP is off, which makes Apple
+    # Intelligence unavailable on macOS 27; see the apple_intelligence_models module.
+    "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/*.asset",
+)
+
 #: Deletable, but only when a module explicitly calls ``.override_protection(reason)``.
 #: Everything here is user data that has a narrow legitimate cleanup case — for example
 #: stale installers in ``~/Downloads`` — but that must never be swept generically.
@@ -417,9 +426,14 @@ def is_protected(path: str) -> Optional[str]:
         if "/" not in remainder or ".Trashes" not in remainder:
             return "%s is on an external or network volume" % target
 
+    # A carve-out lifts only the /System/** rule; every other hard rule still applies.
+    hard = _HARD_PROTECTED
+    if _matches_any(target, _SYSTEM_CARVE_OUTS) is not None:
+        hard = tuple(pattern for pattern in hard if pattern != "/System/**")
+
     # Checked against every plausible home, so a wrong MACCLEANER_HOME cannot expose the
     # real user's data.
-    matched = _matches_any(target, _HARD_PROTECTED, all_homes=True)
+    matched = _matches_any(target, hard, all_homes=True)
     if matched is not None:
         return "%s matches protected pattern %s" % (target, matched)
 
@@ -456,6 +470,7 @@ _PRIVILEGED_ALLOW = (
     "/private/var/folders/*/*/T/**",
     "/private/var/db/coreduet/**",
     "/private/var/db/BootCache.playlist",
+    *_SYSTEM_CARVE_OUTS,
     # Temp directories. The modules that use these apply an age filter first; live
     # sockets and lock files belonging to running processes must survive a cleanup.
     "/private/tmp/**",

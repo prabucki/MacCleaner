@@ -325,6 +325,30 @@ def test_external_volumes_are_protected_except_their_trash():
     assert policy.is_privileged_allowed("/Volumes/SD/.Trashes/501") is None
 
 
+AI_MODELS_DIR = "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto"
+
+
+def test_apple_intelligence_models_are_carved_out_of_system_protection():
+    assert policy.is_privileged_allowed(AI_MODELS_DIR + "/*.asset") is None
+    assert policy.is_privileged_allowed(AI_MODELS_DIR + "/4def6227.asset") is None
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        AI_MODELS_DIR,
+        AI_MODELS_DIR + "/*",
+        AI_MODELS_DIR + "/catalog.plist",
+        "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_Understanding/x.asset",
+        "/System/Library/CoreServices/Finder.app",
+        AI_MODELS_DIR + "/../../../../CoreServices/x.asset",
+        AI_MODELS_DIR + "/repo/.git/x.asset",
+    ],
+)
+def test_system_carve_out_stays_narrow(path):
+    assert policy.is_protected(path) is not None
+
+
 # --------------------------------------------------------------------------------------
 # Risk tiers
 # --------------------------------------------------------------------------------------

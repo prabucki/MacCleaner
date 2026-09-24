@@ -112,6 +112,45 @@ def launch_services(ctx: Context) -> None:
         step.root("rebuild_launch_services")
 
 
+#: Apple Intelligence's on-device models. Each ``*.asset`` directory is one model.
+AI_MODELS = "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/*.asset"
+
+
+def _sip_disabled() -> bool:
+    from mc.util import run
+
+    return "status: disabled" in run(["/usr/bin/csrutil", "status"], timeout=30).stdout
+
+
+@cleanup_module(
+    name="apple_intelligence_models",
+    risk=Risk.AGGRESSIVE,
+    title="Apple Intelligence models",
+    tags=("system", "privileged"),
+)
+def apple_intelligence_models(ctx: Context) -> None:
+    """
+    Remove the Apple Intelligence models, ~13 GB, when SIP is off.
+
+    On macOS 27 turning SIP off makes Apple Intelligence unavailable, and Settings then
+    hides the switch that would normally purge the models. They stay on disk doing
+    nothing. With SIP on the feature works and mobileassetd would just re-download
+    them, so the module skips.
+
+    Not quarantined: staging moves the files within the same volume, so 13 GB would
+    stay pinned for the retention period, and the models are re-downloadable anyway.
+    """
+
+    if not ctx.privileged.available:
+        return ctx.skip(f"needs root: {ctx.privileged.unavailable_reason}")
+
+    if not _sip_disabled():
+        return ctx.skip("SIP is on, so Apple Intelligence is usable and would re-download them")
+
+    with ctx.step("Removing Apple Intelligence models") as step:
+        step.root_path(AI_MODELS, quarantine=False)
+
+
 @cleanup_module(
     name="sleep_image",
     risk=Risk.NUCLEAR,
@@ -209,3 +248,4 @@ def finder_restart(ctx: Context) -> None:
         step.command(["/usr/bin/killall", "Dock"], timeout=30)
         step.command(["/usr/bin/killall", "Finder"], timeout=30)
         step.command(["/usr/bin/killall", "SystemUIServer"], timeout=30)
+
