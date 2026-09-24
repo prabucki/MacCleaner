@@ -356,6 +356,12 @@ def verb_purge_quarantine(argv):
         _fail("%s is outside the quarantine root" % batch_dir)
 
     size = _size_of(batch_dir)
+
+    # Clear the user-immutable flag first. Staging preserves it, and even root cannot
+    # unlink a uchg file: a root-owned, uchg Microsoft AutoUpdate .pkg staged from
+    # /var/folders kept its 2026-09-11 batch alive past retention, run after run.
+    _run(["/usr/bin/chflags", "-R", "nouchg", batch_dir], timeout=120)
+
     try:
         shutil.rmtree(batch_dir, ignore_errors=False)
         _emit({"purged": batch_dir, "bytes": size})
