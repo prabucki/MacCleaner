@@ -56,7 +56,6 @@ disable = [
     "flatpak",
     "snap",
     "nix",
-    "nix_helper",
     "home_manager",
     "guix",
     "pacstall",
@@ -74,7 +73,17 @@ disable = [
     "firmware",
     "gnome_shell_extensions",
     "cinnamon_spices",
+
+    # Present but with nothing to update. pnpm holds no global packages and its bin dir
+    # is not on PATH, so the step only ever failed; cargo has no `cargo install`ed crates
+    # and cargo-update is absent, so the step only ever printed an install hint.
+    "pnpm",
+    "cargo",
 ]
+
+# "nix_helper" is deliberately NOT listed above. topgrade 17 deprecated that step, and
+# naming it — even to disable it — is what prints "`NixHelper` step is deprecated" at the
+# top of every run. Verified with `topgrade --dry-run --only mise --disable nix_helper`.
 
 [brew]
 # --greedy: also upgrade casks that manage their own auto-updates. This is what the
