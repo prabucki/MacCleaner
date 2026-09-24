@@ -215,6 +215,11 @@ def run(
     process = subprocess.Popen(
         command,
         shell=shell,
+        # A captured child must never read the terminal: its prompt goes to the pipe, so
+        # the user sees a frozen progress bar while the child waits on a keypress it never
+        # showed. Corepack's "download pnpm? [Y/n]" did exactly that, twice a run, after
+        # user_caches had emptied ~/.cache/node. With /dev/null a prompt hits EOF at once.
+        stdin=None if stream else subprocess.DEVNULL,
         stdout=None if stream else subprocess.PIPE,
         stderr=None if stream else subprocess.PIPE,
         text=True,

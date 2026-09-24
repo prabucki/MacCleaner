@@ -141,3 +141,13 @@ def test_restore_terminal_is_safe_without_a_tty(monkeypatch):
 
     monkeypatch.setattr("sys.stdin", io.StringIO())
     restore_terminal()  # must not raise
+
+
+def test_captured_child_cannot_block_on_stdin() -> None:
+    """A captured command that reads stdin gets EOF at once instead of waiting on the terminal."""
+
+    started = time.monotonic()
+    completed = run(["/bin/sh", "-c", "read answer; echo got:$answer"], timeout=10)
+
+    assert time.monotonic() - started < 5
+    assert completed.stdout.strip() == "got:"

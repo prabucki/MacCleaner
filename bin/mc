@@ -28,6 +28,11 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$HOME/.local/bi
 # without it, and gem then falls back to Homebrew's read-only default dir.
 export GEM_HOME="${GEM_HOME:-$HOME/.gem}"
 
+# pnpm and yarn here are corepack shims, and the shims default this to 1: after the
+# corepack cache is cleaned they stop to ask before re-downloading the tool. Nobody is
+# there to answer in a scheduled run, and in a terminal the question is captured.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 PYTHON="$REPO_DIR/.venv/bin/python"
 if [ ! -x "$PYTHON" ]; then
     printf 'MacCleaner: no virtualenv at %s - run ./install.sh first\n' "$REPO_DIR/.venv" >&2
