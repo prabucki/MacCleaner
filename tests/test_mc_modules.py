@@ -377,3 +377,35 @@ def test_export_paths_writes_module_and_rule(tmp_path, monkeypatch):
         assert module, f"no module attributed: {line!r}"
         assert rule.startswith("/"), f"rule is not absolute: {rule!r}"
         assert "…" not in rule, f"rule was truncated for display: {rule!r}"
+
+
+def _write_managed_mobileasset(path, kinds):
+    import plistlib
+
+    forced = {f"DownloadServerBaseURLOverride-{kind}": "https://127.0.0.1:9/blocked/" for kind in kinds}
+    path.write_bytes(plistlib.dumps(forced))
+
+
+def test_ai_models_downloads_blocked_needs_every_set(tmp_path, monkeypatch):
+    from mc.modules import system
+
+    managed = tmp_path / "com.apple.MobileAsset.plist"
+    monkeypatch.setattr(system, "MANAGED_MOBILEASSET", str(managed))
+
+    assert not system._downloads_blocked()  # no profile installed
+
+    kinds = list(system.AI_MODEL_SETS.values())
+    _write_managed_mobileasset(managed, kinds[:-1])
+    assert not system._downloads_blocked()  # one set could still re-download
+
+    _write_managed_mobileasset(managed, kinds)
+    assert system._downloads_blocked()
+
+
+def test_ai_models_asset_dir_follows_assetsv2_naming():
+    from mc.modules import system
+
+    assert (
+        system._asset_dir("com.apple.MobileAsset.UAF.FM.GenerativeModels")
+        == "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels"
+    )

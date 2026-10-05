@@ -12,8 +12,13 @@ fails and kextcache -u / has nothing to rebuild; kmutil owns kext collections).
 
 from __future__ import annotations
 
+import json
+import os
+import plistlib
+from pathlib import Path
+
 from mc.registry import Context, Risk, cleanup_module
-from mc.util import human
+from mc.util import MC_HOME, human, run
 
 
 @cleanup_module(name="trash", risk=Risk.SAFE, title="Trash", tags=("core",))
@@ -112,43 +117,131 @@ def launch_services(ctx: Context) -> None:
         step.root("rebuild_launch_services")
 
 
-#: Apple Intelligence's on-device models. Each ``*.asset`` directory is one model.
-AI_MODELS = "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto/*.asset"
+#: Apple Intelligence model sets to reset, UAF asset-set name -> the asset type the
+#: service must report for it. A mismatch means Apple remapped the set, and resetting
+#: by name could then hit something else, so the set is refused. Xcode's code completion
+#: set (com.apple.MobileAsset.UAF.FM.CodeLM) is deliberately left out: it is a tool in
+#: use here, not a dormant feature.
+AI_MODEL_SETS = {
+    "com.apple.modelcatalog": "com.apple.MobileAsset.UAF.FM.GenerativeModels",
+    "com.apple.MobileAsset.UAF.FM.Visual": "com.apple.MobileAsset.UAF.FM.Visual",
+    "com.apple.MobileAsset.UAF.Photos.SpatialPhotosRelive": "com.apple.MobileAsset.UAF.Photos.SpatialPhotosRelive",
+    "com.apple.MobileAsset.UAF.Photos.MagicCleanup": "com.apple.MobileAsset.UAF.Photos.MagicCleanup",
+}
+
+#: Where the download block lands once the RemoveMacAI-style profile (kept in MyMacSetup)
+#: is installed: a forced DownloadServerBaseURLOverride-<asset type> per set.
+MANAGED_MOBILEASSET = "/Library/Managed Preferences/com.apple.MobileAsset.plist"
+
+UAFRESET_SOURCE = Path(__file__).resolve().parent.parent / "native" / "uafreset.m"
 
 
 def _sip_disabled() -> bool:
-    from mc.util import run
-
     return "status: disabled" in run(["/usr/bin/csrutil", "status"], timeout=30).stdout
+
+
+def _downloads_blocked() -> bool:
+    """True when the profile forces every set's download server to a dead address."""
+
+    try:
+        with open(MANAGED_MOBILEASSET, "rb") as handle:
+            forced = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException):
+        return False
+
+    return all(f"DownloadServerBaseURLOverride-{kind}" in forced for kind in AI_MODEL_SETS.values())
+
+
+def _asset_dir(asset_type: str) -> str:
+    return "/System/Library/AssetsV2/" + asset_type.replace(".", "_")
+
+
+def _disk_usage(paths) -> int:
+    existing = [p for p in paths if os.path.isdir(p)]
+    if not existing:
+        return 0
+    result = run(["/usr/bin/du", "-sk", *existing], timeout=120)
+    return sum(int(line.split("\t", 1)[0]) * 1024 for line in result.stdout.splitlines() if line.strip())
+
+
+def _uafreset() -> Path:
+    """Build the helper on first use, and again whenever its source changes."""
+
+    binary = MC_HOME / "bin" / "uafreset"
+    if binary.exists() and binary.stat().st_mtime >= UAFRESET_SOURCE.stat().st_mtime:
+        return binary
+
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        ["/usr/bin/xcrun", "clang", "-fobjc-arc", "-O2", "-framework", "Foundation",
+         "-o", str(binary), str(UAFRESET_SOURCE)],
+        timeout=120,
+        check=True,
+    )
+    return binary
 
 
 @cleanup_module(
     name="apple_intelligence_models",
     risk=Risk.AGGRESSIVE,
     title="Apple Intelligence models",
-    tags=("system", "privileged"),
+    tags=("system",),
 )
 def apple_intelligence_models(ctx: Context) -> None:
     """
-    Remove the Apple Intelligence models, ~13 GB, when SIP is off.
+    Have macOS delete the Apple Intelligence models, ~14 GB, through its asset service.
 
-    On macOS 27 turning SIP off makes Apple Intelligence unavailable, and Settings then
-    hides the switch that would normally purge the models. They stay on disk doing
-    nothing. With SIP on the feature works and mobileassetd would just re-download
-    them, so the module skips.
+    Deleting the files cannot work: each model's .AssetData is a read-only cryptex graft,
+    so even root gets EROFS (23 errors on 2026-10-05). The asset service that grafted
+    them tears them down on a ResetAssetSets call — the mechanism RemoveMacAI uses — via
+    the small helper in mc/native/uafreset.m. Measured 2026-10-05: 13.45 GB across 100
+    model folders gone in 3.4 s, no root needed.
 
-    Not quarantined: staging moves the files within the same volume, so 13 GB would
-    stay pinned for the retention period, and the models are re-downloadable anyway.
+    Runs only when the models cannot simply come back: SIP off (Apple Intelligence is
+    unavailable on macOS 27 then) or the download-block profile installed.
     """
 
-    if not ctx.privileged.available:
-        return ctx.skip(f"needs root: {ctx.privileged.unavailable_reason}")
+    if not (_sip_disabled() or _downloads_blocked()):
+        return ctx.skip("Apple Intelligence is usable and would re-download them; install the download-block profile")
 
-    if not _sip_disabled():
-        return ctx.skip("SIP is on, so Apple Intelligence is usable and would re-download them")
+    # The service leaves an empty purpose_auto/ behind, so a set counts only while it
+    # still holds model assets; otherwise every run would call the service for nothing.
+    present = {
+        name: kind for name, kind in AI_MODEL_SETS.items() if any(Path(_asset_dir(kind)).glob("*/*.asset"))
+    }
+    if not present:
+        return ctx.skip("no model sets on disk")
 
-    with ctx.step("Removing Apple Intelligence models") as step:
-        step.root_path(AI_MODELS, quarantine=False)
+    def reset() -> None:
+        result = ctx.report.module(ctx.name)
+        helper = _uafreset()
+
+        status = json.loads(run([str(helper), "status", *present], timeout=60, check=True).stdout)
+        matched = []
+        for name, kind in present.items():
+            reported = status.get(name, {}).get("type")
+            if reported == kind:
+                matched.append(name)
+            else:
+                result.errors.append(f"{name}: service maps it to {reported!r}, expected {kind!r}; not reset")
+        if not matched:
+            return
+
+        dirs = [_asset_dir(present[name]) for name in matched]
+        before = _disk_usage(dirs)
+        reply = run([str(helper), "reset", *matched], timeout=150 * len(matched))
+        try:
+            outcome = json.loads(reply.stdout)
+        except ValueError:
+            outcome = {name: (reply.stderr.strip() or f"exit {reply.returncode}") for name in matched}
+        for name in matched:
+            if outcome.get(name):
+                result.errors.append(f"{name}: {outcome[name]}")
+
+        result.bytes_reclaimed += max(0, before - _disk_usage(dirs))
+
+    with ctx.step("Asking macOS to remove the Apple Intelligence models") as step:
+        step.action(reset, description="uafreset")
 
 
 @cleanup_module(

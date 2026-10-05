@@ -328,16 +328,15 @@ def test_external_volumes_are_protected_except_their_trash():
 AI_MODELS_DIR = "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_FM_GenerativeModels/purpose_auto"
 
 
-def test_apple_intelligence_models_are_carved_out_of_system_protection():
-    assert policy.is_privileged_allowed(AI_MODELS_DIR + "/*.asset") is None
-    assert policy.is_privileged_allowed(AI_MODELS_DIR + "/4def6227.asset") is None
-
-
+# The models are removed through macOS's asset service now (apple_intelligence_models),
+# so nothing under /System is a deletion target any more.
 @pytest.mark.parametrize(
     "path",
     [
         AI_MODELS_DIR,
         AI_MODELS_DIR + "/*",
+        AI_MODELS_DIR + "/*.asset",
+        AI_MODELS_DIR + "/4def6227.asset",
         AI_MODELS_DIR + "/catalog.plist",
         "/System/Library/AssetsV2/com_apple_MobileAsset_UAF_Siri_Understanding/x.asset",
         "/System/Library/CoreServices/Finder.app",
@@ -345,7 +344,7 @@ def test_apple_intelligence_models_are_carved_out_of_system_protection():
         AI_MODELS_DIR + "/repo/.git/x.asset",
     ],
 )
-def test_system_carve_out_stays_narrow(path):
+def test_system_has_no_carve_outs(path):
     assert policy.is_protected(path) is not None
 
 
