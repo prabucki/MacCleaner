@@ -24,6 +24,8 @@ __all__ = [
     "quit_app",
     "expand_globs",
     "same_volume",
+    "PROJECT_ROOTS",
+    "find_in_projects",
 ]
 
 
@@ -346,3 +348,39 @@ def same_volume(first: Path, second: Path) -> bool:
     first_device, second_device = device(first), device(second)
 
     return first_device is not None and first_device == second_device
+
+
+#: Where source checkouts live. Only existing roots are walked; the first is where they
+#: live on this machine, the rest are common conventions elsewhere.
+PROJECT_ROOTS = ("~/Projects", "~/Developer", "~/code", "~/src")
+
+#: Directories never worth descending into when looking for project files: dependency
+#: and build trees are huge and hold no project configuration of their own.
+_PROJECT_PRUNE = {"node_modules", ".venv", "venv", "Pods", "build", ".next", ".gradle", "DerivedData", "dist"}
+
+
+def find_in_projects(name: str, *, max_depth: int = 6, roots: Sequence[str] = PROJECT_ROOTS) -> list:
+    """
+    Every path called ``name`` (file or directory) under the project roots.
+
+    Depth-limited and pruned so a scheduled run never walks a whole dependency tree. A
+    match is not descended into, so finding ``.git`` does not walk the object store.
+    """
+
+    found = []
+
+    for root in roots:
+        base = Path(os.path.expanduser(root))
+        if not base.is_dir():
+            continue
+
+        base_depth = len(base.parts)
+        for current, dirs, files in os.walk(base, topdown=True, followlinks=False):
+            depth = len(Path(current).parts) - base_depth
+            if name in files:
+                found.append(Path(current) / name)
+            if name in dirs:
+                found.append(Path(current) / name)
+            dirs[:] = [d for d in dirs if d != name and d not in _PROJECT_PRUNE] if depth < max_depth else []
+
+    return found

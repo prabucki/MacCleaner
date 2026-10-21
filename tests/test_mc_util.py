@@ -151,3 +151,26 @@ def test_captured_child_cannot_block_on_stdin() -> None:
 
     assert time.monotonic() - started < 5
     assert completed.stdout.strip() == "got:"
+
+
+def test_find_in_projects_prunes_dependency_trees_and_respects_depth(tmp_path):
+    """Dependency trees are never walked, a match is not descended into, depth is capped."""
+
+    from mc.util import find_in_projects
+
+    wanted = tmp_path / "app" / "android" / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    wanted.parent.mkdir(parents=True)
+    wanted.write_text("distributionUrl=x/gradle-8.10.2-all.zip\n")
+
+    hidden = tmp_path / "app" / "node_modules" / "lib" / "gradle-wrapper.properties"
+    hidden.parent.mkdir(parents=True)
+    hidden.write_text("")
+
+    nested_git = tmp_path / "app" / ".git" / "modules" / "sub" / ".git"
+    nested_git.mkdir(parents=True)
+    (tmp_path / "app" / ".git").mkdir(exist_ok=True)
+
+    root = [str(tmp_path)]
+    assert find_in_projects("gradle-wrapper.properties", roots=root) == [wanted]
+    assert find_in_projects(".git", roots=root) == [tmp_path / "app" / ".git"]
+    assert find_in_projects("gradle-wrapper.properties", roots=root, max_depth=2) == []

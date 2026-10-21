@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import List
 
 from mc.registry import Context, Risk, cleanup_module
+from mc.util import find_in_projects, human, run
 
 #: Trees not worth walking for .DS_Store: they either cannot contain them, are protected
 #: anyway, or are large enough that scanning costs more than the bytes reclaimed.
@@ -181,3 +182,59 @@ def react_native(ctx: Context) -> None:
             step.command([ctx.which("watchman"), "watch-del-all"], timeout=120)
             step.command([ctx.which("watchman"), "shutdown-server"], timeout=60)
             step.path("/private/var/usr/local/var/run/watchman/*-state/*")
+
+
+#: Loose objects above this are worth a ``git gc``. Below it the repack costs more time
+#: than it saves space.
+GIT_LOOSE_THRESHOLD = 100 * 1024**2
+
+#: Files git leaves while an operation is half done. ``gc`` during one is safe in
+#: principle, but a repo mid-rebase is not one to touch unattended.
+GIT_BUSY_MARKERS = ("index.lock", "gc.pid", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG",
+                    "rebase-merge", "rebase-apply")
+
+
+@cleanup_module(
+    name="git_gc",
+    risk=Risk.AGGRESSIVE,
+    title="Compress git repositories",
+    requires_binary=("git",),
+    tags=("dev",),
+)
+def git_gc(ctx: Context) -> None:
+    """
+    ``git gc`` repositories under the project roots that hold over 100 MB of loose objects.
+
+    Git only auto-packs after thousands of loose objects, so a repo with a few large
+    files can sit unpacked indefinitely: one held 1.35 GB loose and 91 KB once packed.
+
+    Aggressive because ``gc`` also prunes unreachable objects older than git's own
+    ``gc.pruneExpire`` (two weeks): content that was staged but never committed is gone
+    for good after this. Reachable history, stashes and reflogs are untouched.
+    """
+
+    repos = [git_dir.parent for git_dir in find_in_projects(".git", max_depth=4) if git_dir.is_dir()]
+
+    targets = []
+    for repo in repos:
+        if any((repo / ".git" / marker).exists() for marker in GIT_BUSY_MARKERS):
+            continue
+        result = run(["git", "-C", str(repo), "count-objects", "-v"], timeout=60)
+        if result.returncode != 0:
+            continue
+        fields = dict(line.split(": ", 1) for line in result.stdout.splitlines() if ": " in line)
+        loose = int(fields.get("size", "0")) * 1024
+        if loose >= GIT_LOOSE_THRESHOLD:
+            targets.append((repo, loose))
+
+    if not targets:
+        return ctx.skip(f"no repo over {human(GIT_LOOSE_THRESHOLD)} loose ({len(repos)} checked)")
+
+    with ctx.step(f"Compressing {len(targets)} git repo(s)") as step:
+        for repo, loose in targets:
+            step.command(
+                ["git", "-C", str(repo), "gc", "--quiet"],
+                timeout=1800,
+                description=f"git gc {repo.name} ({human(loose)} loose)",
+            )
+

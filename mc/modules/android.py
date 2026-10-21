@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Sequence, Set, Tuple
 
 from mc.registry import Context, Risk, cleanup_module
+from mc.util import find_in_projects, run
 
 ANDROID_SDK = "~/Library/Android/sdk"
 
@@ -179,3 +180,52 @@ def android_caches(ctx: Context) -> None:
             "~/Library/Caches/Google/AndroidStudio*/*",
             "~/Library/Logs/Google/AndroidStudio*/*",
         )
+
+
+@cleanup_module(
+    name="gradle_unused_wrappers",
+    risk=Risk.STANDARD,
+    title="Unused Gradle wrapper versions",
+    requires=("~/.gradle/wrapper/dists",),
+    tags=("dev", "android"),
+)
+def gradle_unused_wrappers(ctx: Context) -> None:
+    """
+    Unpacked Gradle distributions that no project under the project roots asks for.
+
+    ``android_caches`` only removes the downloaded zips; the unpacked distributions stay
+    forever, one per version any project ever used. 16 had piled up here (2.8 to 9.2,
+    3.3 GB) against one version actually referenced. A wrongly removed version costs a
+    single re-download on that project's next build.
+    """
+
+    properties = find_in_projects("gradle-wrapper.properties", max_depth=7)
+
+    # Without any project to read, every version would look unused.
+    if not properties:
+        return ctx.skip("no gradle-wrapper.properties under the project roots")
+
+    if run(["pgrep", "-f", "GradleDaemon"], timeout=10).returncode == 0:
+        return ctx.skip("a Gradle daemon is running")
+
+    wanted: Set[str] = set()
+    for path in properties:
+        try:
+            text = path.read_text(errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if line.strip().startswith("distributionUrl"):
+                # distributionUrl=https\://services.gradle.org/distributions/gradle-8.10.2-all.zip
+                wanted.add(line.rsplit("/", 1)[-1].removesuffix(".zip"))
+
+    installed = ctx.glob("~/.gradle/wrapper/dists/gradle-*")
+    unused = [d for d in installed if d.name not in wanted]
+
+    if not unused:
+        return ctx.skip(f"all {len(installed)} installed version(s) are referenced by a project")
+
+    with ctx.step(f"Removing {len(unused)} unused Gradle version(s)") as step:
+        for dist in unused:
+            step.path(str(dist))
+
