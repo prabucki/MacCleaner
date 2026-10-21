@@ -309,6 +309,8 @@ def vscode_family(ctx: Context) -> None:
                 f"{base}/DawnWebGPUCache/*",
                 f"{base}/logs/*",
                 f"{base}/User/workspaceStorage/*/state.vscdb.backup",
+                # The global copy is the large one: 645 MB under Cursor on 2026-10-21.
+                f"{base}/User/globalStorage/state.vscdb.backup",
                 f"{base}/Crashpad/completed/*",
             )
 

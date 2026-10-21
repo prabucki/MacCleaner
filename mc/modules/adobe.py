@@ -13,7 +13,15 @@ from __future__ import annotations
 from mc.registry import Context, Risk, cleanup_module
 
 #: Adobe apps that must not be running when their caches are removed.
-ADOBE_PROCESSES = ("Adobe Premiere Pro 2025", "Adobe After Effects 2025", "Adobe Media Encoder 2025")
+# The Beta builds run under their own executable names; without them the cache was
+# cleared from under a running Premiere Pro (Beta).
+ADOBE_PROCESSES = (
+    "Adobe Premiere Pro 2025",
+    "Adobe After Effects 2025",
+    "Adobe Media Encoder 2025",
+    "Adobe Premiere Pro (Beta)",
+    "Adobe Media Encoder (Beta)",
+)
 
 
 @cleanup_module(
@@ -44,6 +52,16 @@ def adobe_media_cache(ctx: Context) -> None:
             "~/Library/Application Support/Adobe/Common/Media Cache/*",
             "~/Library/Application Support/Adobe/Common/Peak Files/*",
             "~/Library/Application Support/Adobe/Common/Team Projects Cache/*",
+        )
+
+    with ctx.step("Clearing Premiere and Media Encoder audio previews") as step:
+        # The one ~/Documents exception: Adobe writes conformed audio previews to a fixed
+        # "Adobe <app> Audio Previews" folder there by default. The name is Adobe's, not
+        # the user's, so the glob cannot reach a project folder. 2.5 GB under Media
+        # Encoder (Beta) alone on 2026-10-21.
+        step.path(
+            "~/Documents/Adobe/*/Adobe * Audio Previews/*",
+            override="Adobe-named audio preview cache, reconformed on demand",
         )
 
     with ctx.step("Clearing After Effects and Premiere disk caches") as step:
