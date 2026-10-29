@@ -191,7 +191,16 @@ def test_virtual_machines_and_their_archives_are_protected(path, privileged, ove
     assert not decision.allowed, f"{path} was deletable (privileged={privileged}, override={override})"
 
 
-@pytest.mark.parametrize("path", ["~/Documents/report.docx", "~/Desktop/notes.txt", "~/Pictures/holiday.jpg"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "~/Documents/report.docx",
+        "~/Desktop/notes.txt",
+        "~/Pictures/holiday.jpg",
+        "~/Library/Logs/brew-update.log",
+        "~/Library/Logs/macsync.log",
+    ],
+)
 def test_soft_protected_needs_override(path):
     assert not policy.check(path).allowed
     assert policy.check(path, override=True).allowed
@@ -209,6 +218,7 @@ def test_soft_protected_needs_override(path):
         "~/Library/Caches/Firefox/Profiles/abc/cache2/entries",
         "~/.cache/pip/http",
         "~/Library/Logs/DiagnosticReports/foo.crash",
+        "~/Library/Logs/mount-cloud.log",
         "~/Library/Developer/Xcode/DerivedData/App-abc",
         "~/Library/Application Support/Ferdium/Partitions/service-1/Cache",
         "~/.Trash/old",

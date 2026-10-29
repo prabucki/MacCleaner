@@ -388,6 +388,14 @@ _SOFT_PROTECTED = (
     "~/Library/Caches/com.raycast.macos/Clipboard/**",
     "~/Library/Application Support/CleanShot/media",
     "~/Library/Application Support/CleanShot/media/**",
+    # MyMacSetup's own agent logs. user_logs globs ~/Library/Logs/* wholesale, and
+    # these are not disposable: MacControl's probes read brew-update.log to report
+    # the last Homebrew run, so wiping it turned a failed run (exit 1) into
+    # "no run logged yet" and lost the error with it (2026-10-29). Only logs that
+    # their writer trims to 512KB belong here; the other agent logs are not
+    # bounded, so mc stays the thing that clears them.
+    "~/Library/Logs/brew-update.log",
+    "~/Library/Logs/macsync.log",
     "~/.zshrc",
     "~/.zshenv",
     "~/.bashrc",
