@@ -89,8 +89,16 @@ disable = [
     "ruby_gems",
 
     # Installed as the Homebrew cask cursor-cli; its self-updater would rewrite the
-    # Caskroom payload behind brew's back. The brew steps above upgrade it.
+    # Caskroom payload behind brew's back. com.prabucki.brewupdate upgrades it.
     "cursor_agent",
+
+    # Homebrew upgrades belong to MyMacSetup's brew-update.sh (com.prabucki.brewupdate,
+    # nightly). Upgrading here bypassed its CASK_SKIP list and its policies.json rewrite:
+    # the 2026-10-29 run upgraded Tor Browser and left it free to self-update, and
+    # upgraded setapp/raycast/claude, which update themselves. `brew cleanup` still runs
+    # from mc/update.py's _homebrew_extras.
+    "brew_formula",
+    "brew_cask",
 ]
 
 # "nix_helper" is deliberately NOT listed above. topgrade 17 deprecated that step, and
@@ -105,10 +113,8 @@ disable = [
 "Gems" = 'gem update --no-document $(ls "${GEM_HOME:-$HOME/.gem}/specifications" | sed -E "s/-[0-9][^-]*(-.+)?\.gemspec$//" | sort -u)'
 
 [brew]
-# --greedy: also upgrade casks that manage their own auto-updates. This is what the
-# original MasterCleanScript did with `brew upgrade --cask --greedy`. The documented
-# trade-off is that some casks reinstall on every run because their version string does
-# not change; `mc --skip brew_greedy` turns it off if that becomes annoying.
+# Inert while brew_formula/brew_cask are disabled above; kept so re-enabling them
+# restores the original MasterCleanScript behaviour (`brew upgrade --cask --greedy`).
 greedy_cask = true
 autoremove = true
 

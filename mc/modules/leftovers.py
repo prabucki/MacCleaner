@@ -126,16 +126,21 @@ def _is_kept(name: str, installed: Set[str]) -> bool:
     if any(name.startswith(prefix) for prefix in KEEP_PREFIXES):
         return True
 
-    if name in installed:
+    # A group container is "group.com.vendor.app", "TEAMID.com.vendor.app" or both,
+    # "TEAMID.group.com.vendor.app". Stripping only one prefix, and running the prefix
+    # check below on the raw name, staged the live containers of Google Drive, LookAway
+    # and Creative Cloud on 2026-10-29.
+    stripped = re.sub(r"^(?:[A-Z0-9]{10}\.)?(?:groups?\.)?", "", name)
+    if any(stripped.startswith(prefix) for prefix in KEEP_PREFIXES):
         return True
 
-    # A group container is "group.com.vendor.app" or "TEAMID.com.vendor.app".
-    stripped = re.sub(r"^(group\.|[A-Z0-9]{10}\.)", "", name)
-    if stripped in installed:
-        return True
-
-    # Any installed bundle that is a prefix of this one — helper apps, XPC services.
-    return any(name.startswith(known + ".") or known.startswith(name + ".") for known in installed)
+    # Any installed bundle that is a prefix of this one — helper apps, XPC services,
+    # "<bundle-id>.shared" group containers.
+    return any(
+        candidate == known or candidate.startswith(known + ".") or known.startswith(candidate + ".")
+        for candidate in {name, stripped}
+        for known in installed
+    )
 
 
 def _find_orphans() -> Dict[str, List[Path]]:
