@@ -328,13 +328,51 @@ def test_estimate_deduplicates_overlapping_modules(runtime_factory, sandbox):
     """
 
     runtime, _, _ = runtime_factory(dry_run=True)
-    seen: set = set()
+    seen: dict = {}
 
     first = runtime.estimate(_path_module(sandbox("Library/Caches/*")), seen)
     second = runtime.estimate(_path_module(sandbox("Library/Caches/SomeApp")), seen)
 
     assert first > 0
     assert second == 0, "the nested path was already counted by the glob above it"
+
+
+def test_estimate_does_not_double_count_when_the_narrow_rule_runs_first(runtime_factory, sandbox, fake_home):
+    """
+    The 2026-10-29 run: node's `Caches/yarn/*` was measured before user_caches'
+    `Caches/*`, and the 3.2 GB yarn cache landed in both modules' figures.
+    """
+
+    yarn = fake_home / "Library/Caches/yarn/v6"
+    yarn.mkdir(parents=True, exist_ok=True)
+    (yarn / "pkg").write_bytes(b"y" * 8192)
+
+    runtime, _, _ = runtime_factory(dry_run=True)
+    seen: dict = {}
+    narrow = runtime.estimate(_path_module(sandbox("Library/Caches/yarn/*")), seen)
+    wide = runtime.estimate(_path_module(sandbox("Library/Caches/*")), seen)
+
+    alone = runtime.estimate(_path_module(sandbox("Library/Caches/*")), {})
+    assert narrow >= 8192
+    assert narrow + wide == alone, "the yarn cache was counted by both rules"
+
+
+def test_logs_glob_leaves_the_diagnosticreports_folder_itself(runtime_factory, sandbox, fake_home):
+    logs = fake_home / "Library/Logs"
+    reports = logs / "DiagnosticReports"
+    reports.mkdir(parents=True, exist_ok=True)
+    (reports / "App.ips").write_bytes(b"c" * 1024)
+    (logs / "SomeApp").mkdir(exist_ok=True)
+    (logs / "SomeApp" / "app.log").write_bytes(b"l" * 1024)
+
+    runtime, report, batch = runtime_factory()
+    runtime.delete_path(_path_module(sandbox("Library/Logs/*")))
+    runtime.delete_path(_path_module(sandbox("Library/Logs/DiagnosticReports/*")))
+    batch.close()
+
+    assert reports.is_dir(), "the folder macOS writes crash reports into must survive"
+    assert not (reports / "App.ips").exists() and not (logs / "SomeApp").exists()
+    assert not any(r.paths_denied for r in report.modules.values()), "a glob hit is not a denial"
 
 
 # --------------------------------------------------------------------------------------

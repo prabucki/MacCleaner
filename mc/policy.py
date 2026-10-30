@@ -236,6 +236,11 @@ _NEVER_THE_TARGET = (
     "~/Library/Caches",
     "~/Library/Containers",
     "~/Library/Group Containers",
+    # `~/Library/Logs/*` matched the DiagnosticReports folder itself, and on
+    # 2026-10-29 user_logs staged it whole; macOS did not recreate it, so the
+    # next crash report had nowhere to go. Its contents are still cleaned.
+    "~/Library/Logs",
+    "~/Library/Logs/DiagnosticReports",
 )
 
 #: Irreplaceable user data and credentials. Hard deny, no override path exists.
@@ -538,6 +543,12 @@ class Decision(object):
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         verdict = "allow" if self.allowed else "deny"
         return "<Decision %s %s%s>" % (verdict, self.path, "" if self.allowed else ": " + str(self.reason))
+
+
+def is_structural(path: str) -> bool:
+    """True for a folder whose contents may go but which itself never does."""
+
+    return _matches_any(normalize(path), _NEVER_THE_TARGET, all_homes=True) is not None
 
 
 def check(path: str, privileged: bool = False, override: bool = False) -> Decision:

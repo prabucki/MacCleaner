@@ -218,11 +218,14 @@ class Step:
 
         return self
 
-    def root(self, verb: str, *args: str) -> "Step":
+    def root(self, verb: str, *args: str, reclaims: Sequence[str] = ()) -> "Step":
         """
         Invoke a root-helper maintenance verb.
 
         :param verb: Method name on :class:`mc.privileged.Privileged`, e.g. ``flush_dns``.
+        :param reclaims: Paths the verb frees. Measured before and after, and the
+            difference credited as reclaimed: helper verbs report an exit code, not
+            bytes, so `log erase` used to show "0 B" after freeing 2 GB.
         """
 
         privileged = self._context.privileged
@@ -237,9 +240,13 @@ class Step:
                     f"{verb}: {privileged.unavailable_reason}"
                 )
                 return None
+            before = _measure(reclaims)
             result = handler(*args)
+            module_report = self._context.report.module(self._context.name)
             if not result.ok:
-                self._context.report.module(self._context.name).errors.append(f"{verb}: {result.error}")
+                module_report.errors.append(f"{verb}: {result.error}")
+            elif reclaims:
+                module_report.bytes_reclaimed += max(0, before - _measure(reclaims))
             return None
 
         return self.action(invoke, description=f"root:{verb}")
@@ -256,6 +263,17 @@ class Step:
             self._unit.add(Action(lambda name=process_name: quit_app(name), description=f"quit {process_name}"))
 
         return self
+
+
+def _measure(patterns: Sequence[str]) -> int:
+    """Total size of what these paths or globs currently hold (0 when absent)."""
+
+    import glob
+    import os
+
+    from mc.util import path_size
+
+    return sum(path_size(Path_(match)) for pattern in patterns for match in glob.glob(os.path.expanduser(pattern)))
 
 
 class Context:

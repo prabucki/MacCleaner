@@ -86,7 +86,7 @@ def unified_log(ctx: Context) -> None:
     with ctx.step("Erasing the unified log store") as step:
         # Measured before erasing so the report can attribute the reclaim.
         step.measure("/private/var/db/diagnostics", "/private/var/db/uuidtext")
-        step.root("erase_unified_log")
+        step.root("erase_unified_log", reclaims=("/private/var/db/diagnostics", "/private/var/db/uuidtext"))
 
 
 @cleanup_module(

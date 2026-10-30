@@ -110,8 +110,16 @@ class Runtime:
     def _handle_local(self, pattern: str, result, use_quarantine: bool, override: bool) -> None:
         """Delete or stage paths the current user owns."""
 
+        globbed = any(char in pattern for char in "*?[")
+
         for concrete in self._expand(pattern):
             if self.selection is not None and self.selection.excludes_path(str(concrete)):
+                continue
+
+            # A wildcard reaching a structural folder (`~/Library/Logs/*` hits
+            # DiagnosticReports) is not something the module asked to delete, so it
+            # is skipped quietly instead of showing up as "1 denied by policy".
+            if globbed and policy.is_structural(str(concrete)):
                 continue
 
             verdict = policy.check(str(concrete), privileged=False, override=override)
@@ -247,7 +255,7 @@ class Runtime:
 
     # -- size estimation ---------------------------------------------------------------
 
-    def estimate(self, path_module, seen: Optional[set] = None, detail: Optional[list] = None) -> int:
+    def estimate(self, path_module, seen: Optional[dict] = None, detail: Optional[list] = None) -> int:
         """
         Bytes this path module would account for, honouring policy.
 
@@ -255,7 +263,7 @@ class Runtime:
         deleted rather than what was merely requested. Upstream's own estimator counts
         every path it was handed, including ones its safety check would later refuse.
 
-        :param seen: Shared set of already-counted paths. Several modules legitimately
+        :param seen: Shared dict of already-counted paths and their sizes. Several modules legitimately
             target the same directory — the generic Electron sweeper and the Ferdium
             rules both reach Ferdium's partitions — and without this the total is
             inflated by every overlap. Deletion itself is idempotent, so the overlap only
@@ -298,6 +306,10 @@ class Runtime:
                 if policy.resolve_escapes(str(concrete)) is not None:
                     continue
 
+            if not measure_only and policy.is_structural(str(concrete)):
+                continue  # same quiet skip as _handle_local: never deleted, so never counted
+
+            nested = 0
             if seen is not None:
                 as_text = str(concrete)
 
@@ -305,12 +317,19 @@ class Runtime:
                 if as_text in seen or any(str(parent) in seen for parent in concrete.parents):
                     continue
 
-                seen.add(as_text)
+                # The other direction: a narrower rule counted something inside this
+                # path first (node's `Caches/yarn/*` before user_caches' `Caches/*`).
+                # Without subtracting it the 3.2 GB yarn cache was counted twice.
+                prefix = as_text.rstrip("/") + "/"
+                for inner in [path for path in seen if path.startswith(prefix)]:
+                    nested += seen.pop(inner)
 
             size = path_size(concrete)
-            total += size
+            if seen is not None:
+                seen[as_text] = size
+            total += size - nested
 
-            if detail is not None and size:
-                detail.append((concrete, size))
+            if detail is not None and size - nested:
+                detail.append((concrete, size - nested))
 
         return total

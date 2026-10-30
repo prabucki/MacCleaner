@@ -618,7 +618,7 @@ def _estimate(collector: _Collector, runtime: Runtime, *, verbose: bool, details
     path_modules = [module for module in modules if isinstance(module, UpstreamPath)]
 
     total = 0
-    seen: set = set()  # shared across modules so overlapping rules are counted once
+    seen: dict = {}  # path -> size, shared across modules so overlapping rules are counted once
 
     for module in ProgressBar.wrap_iter(path_modules, description="Measuring", total=len(path_modules)):
         owner = getattr(module, "owner", "unknown")
